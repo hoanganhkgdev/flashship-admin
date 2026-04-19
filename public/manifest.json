@@ -1,0 +1,17 @@
+{
+    "name": "Flashship Admin",
+    "short_name": "Flashship",
+    "start_url": "/",
+    "background_color": "#ffffff",
+    "description": "Hệ thống quản lý Flashship",
+    "display": "standalone",
+    "theme_color": "#22c55e",
+    "icons": [
+        {
+            "src": "logo.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}

@@ -1,0 +1,10 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/ixrlmplu/admin.flashship.vn
+    - cd $DEPLOYPATH && composer install --no-dev --optimize-autoloader --no-interaction
+    - cd $DEPLOYPATH && php artisan migrate --force
+    - cd $DEPLOYPATH && php artisan config:cache
+    - cd $DEPLOYPATH && php artisan route:cache
+    - cd $DEPLOYPATH && php artisan view:cache
+    - cd $DEPLOYPATH && php artisan cache:clear
