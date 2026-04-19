@@ -13,6 +13,7 @@ use Filament\Tables;
 use Filament\Tables\Table;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Actions;
@@ -138,14 +139,22 @@ class OrderResource extends Resource
                         Forms\Components\Select::make('delivery_man_id')
                             ->label('Gán tài xế (tùy chọn)')
                             ->placeholder('— Không gán —')
-                            ->options(function (Forms\Get $get) {
+                            ->options(function (Forms\Get $get, ?Model $record) {
                                 $cityId = $get('city_id');
-                                return \App\Models\User::drivers()
-                                    ->where('is_online', true)
+                                $query = \App\Models\User::drivers()
                                     ->where('status', 1)
                                     ->when($cityId, fn($q) => $q->where('city_id', $cityId))
-                                    ->get()
-                                    ->mapWithKeys(fn($u) => [$u->id => "#{$u->id} {$u->name}"]);
+                                    ->where(function ($q) use ($record) {
+                                        // Luôn giữ tài xế đang được gán dù offline
+                                        $q->where('is_online', true);
+                                        if ($record?->delivery_man_id) {
+                                            $q->orWhere('id', $record->delivery_man_id);
+                                        }
+                                    });
+                                return $query->get()
+                                    ->mapWithKeys(fn($u) => [
+                                        $u->id => ($u->is_online ? '🟢' : '⚫') . " #{$u->id} {$u->name}"
+                                    ]);
                             })
                             ->searchable()
                             ->live()
