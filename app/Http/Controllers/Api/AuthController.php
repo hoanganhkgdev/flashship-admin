@@ -72,9 +72,10 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $data = $request->validate([
-            'login' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:6'],
+            'login'     => ['required', 'string'],
+            'password'  => ['required', 'string', 'min:6'],
             'device_id' => ['nullable', 'string'],
+            'fcm_token' => ['nullable', 'string'],
         ]);
 
         $field = filter_var($data['login'], FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';
@@ -124,6 +125,15 @@ class AuthController extends Controller
         }
 
 
+        // Gán FCM token ngay lúc login, xóa khỏi user khác để tránh nhận nhầm thông báo
+        if (!empty($data['fcm_token'])) {
+            User::where('fcm_token', $data['fcm_token'])
+                ->where('id', '!=', $user->id)
+                ->update(['fcm_token' => null]);
+            $user->fcm_token = $data['fcm_token'];
+            $user->save();
+        }
+
         $tokenName = $currentDeviceId ? "api_token_{$currentDeviceId}" : 'api_token';
         $token = $user->createToken($tokenName)->plainTextToken;
 
@@ -142,7 +152,10 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        $user = $request->user();
+        $user->fcm_token = null;
+        $user->save();
+        $user->currentAccessToken()->delete();
 
         return response()->json([
             'success' => true,
