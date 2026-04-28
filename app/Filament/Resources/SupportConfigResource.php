@@ -109,9 +109,14 @@ class SupportConfigResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => Pages\ListSupportConfigs::route('/'),
+            'index'  => Pages\ListSupportConfigs::route('/'),
             'create' => Pages\CreateSupportConfig::route('/create'),
-            'edit' => Pages\EditSupportConfig::route('/{record}/edit'),
+            'edit'   => Pages\EditSupportConfig::route('/{record}/edit'),
         ];
     }
+
+    public static function canViewAny(): bool       { return auth()->check() && auth()->user()->hasRole('admin'); }
+    public static function canCreate(): bool        { return auth()->check() && auth()->user()->hasRole('admin'); }
+    public static function canEdit($record): bool   { return auth()->check() && auth()->user()->hasRole('admin'); }
+    public static function canDelete($record): bool { return auth()->check() && auth()->user()->hasRole('admin'); }
 }

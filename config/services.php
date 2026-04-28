@@ -65,29 +65,18 @@ return [
 
     'google' => [
         'maps_key' => env('GOOGLE_MAPS_JS_KEY'),
-        'api_key' => env('GOOGLE_MAPS_API_KEY'),
     ],
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
     ],
-    'zalo' => [
-        'oa_id' => env('ZALO_OA_ID'),
-        'app_id' => env('ZALO_APP_ID'),
-        'app_secret' => env('ZALO_APP_SECRET'),
-        'access_token' => env('ZALO_ACCESS_TOKEN'), // Added this
-    ],
-    'facebook' => [
-        'page_id' => env('FACEBOOK_PAGE_ID'),
-        'access_token' => env('FACEBOOK_ACCESS_TOKEN'),
-        'verify_token' => env('FACEBOOK_VERIFY_TOKEN'),
-    ],
     'firebase' => [
-        'database_url'       => env('FIREBASE_DATABASE_URL'),
-        'api_key'            => env('FIREBASE_API_KEY'),
-        'auth_domain'        => env('FIREBASE_AUTH_DOMAIN'),
-        'project_id'         => env('FIREBASE_PROJECT_ID'),
-        'storage_bucket'     => env('FIREBASE_STORAGE_BUCKET'),
-        'messaging_sender_id'=> env('FIREBASE_MESSAGING_SENDER_ID'),
-        'app_id'             => env('FIREBASE_APP_ID'),
+        'database_url'         => env('FIREBASE_DATABASE_URL'),
+        'api_key'              => env('FIREBASE_API_KEY'),
+        'auth_domain'          => env('FIREBASE_AUTH_DOMAIN'),
+        'project_id'           => env('FIREBASE_PROJECT_ID'),
+        'storage_bucket'       => env('FIREBASE_STORAGE_BUCKET'),
+        'messaging_sender_id'  => env('FIREBASE_MESSAGING_SENDER_ID'),
+        'app_id'               => env('FIREBASE_APP_ID'),
+        'service_account_path' => env('FIREBASE_SERVICE_ACCOUNT_PATH') ?: storage_path('app/firebase-service-account.json'),
     ],
 ];

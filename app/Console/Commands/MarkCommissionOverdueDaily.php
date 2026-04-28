@@ -56,28 +56,11 @@ class MarkCommissionOverdueDaily extends Command
                 ? $dates->take(3)->implode(', ') . ' và ' . ($dates->count() - 3) . ' ngày khác'
                 : $dates->implode(', ');
 
-            // Gửi thông báo quá hạn
             if ($driver->fcm_token) {
-                $title = '🚫 Công nợ chiết khấu đã quá hạn';
-                $body = "Bạn có " . $driverDebts->count() . " công nợ quá hạn (tổng: " . number_format($totalOverdue, 0, ',', '.') . "đ)\n" .
-                    "Các ngày: " . $datesText . "\n" .
-                    "Vui lòng thanh toán để tiếp tục nhận đơn.";
-
-                $data = [
-                    'type' => 'commission_debt_overdue',
-                    'count' => (string) $driverDebts->count(),
-                    'total_amount' => (string) $totalOverdue,
-                ];
-
-                try {
-                    \App\Helpers\FcmHelper::sendToMultiple([$driver->fcm_token], $title, $body, $data);
-                    
-                    // ✅ Lưu vào Lịch sử thông báo trên App (Database)
-                    $driver->notify(new \App\Notifications\DriverAppNotification($title, $body, 'error'));
-
-                    Log::info("✅ Đã gửi thông báo quá hạn FCM cho tài xế #{$driver->id}");
-                } catch (\Throwable $e) {
-                }
+                \App\Services\NotificationService::notifyCommissionDebtOverdue(
+                    $driver, $driverDebts->count(), $totalOverdue, $datesText
+                );
+                Log::info("✅ Gửi FCM công nợ quá hạn cho tài xế #{$driver->id}");
             }
         }
 

@@ -7,30 +7,37 @@ use Illuminate\Support\Facades\DB;
 
 class DriverWalletService
 {
-    public static function adjust($driverId, $amount, $type = 'credit', $desc = null, $ref = null)
-    {
-        return DB::transaction(function () use ($driverId, $amount, $type, $desc, $ref) {
+    /**
+     * @param  bool  $allowNegative  Cho phép số dư âm (dùng cho điều chỉnh thủ công từ admin)
+     */
+    public static function adjust(
+        int|string $driverId,
+        float $amount,
+        string $type = 'credit',
+        ?string $desc = null,
+        ?string $ref = null,
+        bool $allowNegative = false
+    ) {
+        return DB::transaction(function () use ($driverId, $amount, $type, $desc, $ref, $allowNegative) {
             $wallet = DriverWallet::firstOrCreate(['driver_id' => $driverId]);
 
-            // 🔹 Kiểm tra trùng lặp nếu có reference
             if ($ref && $wallet->transactions()->where('reference', $ref)->exists()) {
                 return $wallet->transactions()->where('reference', $ref)->first();
             }
 
-            if ($type === 'debit' && $wallet->balance < $amount) {
-                throw new \Exception("Số dư không đủ");
+            if ($type === 'debit' && !$allowNegative && $wallet->balance < $amount) {
+                throw new \Exception("Số dư không đủ (hiện có: " . number_format($wallet->balance, 0, ',', '.') . "₫)");
             }
 
             $wallet->balance += $type === 'credit' ? $amount : -$amount;
             $wallet->save();
 
             return $wallet->transactions()->create([
-                'type' => $type,
-                'amount' => $amount,
+                'type'        => $type,
+                'amount'      => $amount,
                 'description' => $desc,
-                'reference' => $ref,
+                'reference'   => $ref,
             ]);
         });
     }
-
 }

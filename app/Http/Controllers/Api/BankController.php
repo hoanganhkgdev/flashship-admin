@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Bank\UpdateBankRequest;
 use App\Models\Bank;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use App\Models\BankList;
+use Illuminate\Support\Facades\Auth;
 
 class BankController extends Controller
 {
@@ -26,14 +26,9 @@ class BankController extends Controller
     /**
      * Cập nhật hoặc tạo mới bank info cho user
      */
-    public function update(Request $request)
+    public function update(UpdateBankRequest $request)
     {
-        $data = $request->validate([
-            'bank_code'    => 'nullable|string|max:20',
-            'bank_name'    => 'nullable|string|max:255',
-            'bank_account' => 'nullable|string|max:50',
-            'bank_owner'   => 'nullable|string|max:255',
-        ]);
+        $data = $request->validated();
 
         $bank = Bank::updateOrCreate(
             ['user_id' => Auth::id()],

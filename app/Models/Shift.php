@@ -2,10 +2,9 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
-use App\Models\User;
-use App\Models\PlanShiftRate;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 class Shift extends Model
 {
@@ -15,8 +14,16 @@ class Shift extends Model
         'name',
         'start_time',
         'end_time',
-        'is_active'
+        'is_active',
     ];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+    ];
+
+    // =========================================================================
+    // RELATIONSHIPS
+    // =========================================================================
 
     public function city()
     {
@@ -28,6 +35,24 @@ class Shift extends Model
         return $this->belongsToMany(User::class, 'shift_user', 'shift_id', 'user_id');
     }
 
+    // =========================================================================
+    // SCOPES
+    // =========================================================================
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('is_active', true);
+    }
+
+    public function scopeForCity(Builder $query, int $cityId): Builder
+    {
+        return $query->where('city_id', $cityId);
+    }
+
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
+
     public function isNowInShift(): bool
     {
         $now   = Carbon::now();
@@ -35,13 +60,19 @@ class Shift extends Model
         $end   = Carbon::parse($this->end_time);
 
         if ($end->lessThan($start)) {
-            // Ca qua đêm (ví dụ 22:00 - 05:00)
-            // Case A: 22:00 → 23:59  →  $now >= $start
-            // Case B: 00:00 → 05:00  →  $now <= $end
+            // Overnight shift (e.g. 22:00 – 05:00)
             return $now->greaterThanOrEqualTo($start) || $now->lessThanOrEqualTo($end);
         }
 
         return $now->between($start, $end);
     }
-}
 
+    // =========================================================================
+    // ACCESSORS
+    // =========================================================================
+
+    public function getTimeRangeAttribute(): string
+    {
+        return substr($this->start_time, 0, 5) . ' – ' . substr($this->end_time, 0, 5);
+    }
+}

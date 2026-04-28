@@ -77,7 +77,9 @@ class DriverDebt extends Model
     public function getCommissionRateAttribute()
     {
         try {
-            return $this->driver?->plan?->commission_rate ?? 15;
+            return $this->driver?->custom_commission_rate
+                ?? $this->driver?->plan?->commission_rate
+                ?? 15;
         } catch (\Exception $e) {
             return 15;
         }

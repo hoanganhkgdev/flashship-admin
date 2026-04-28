@@ -10,15 +10,15 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        // Trả lại mặc định là 'pending' cho các đơn lên thủ công bởi Admin/Dispatcher
-        \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM('pending', 'assigned', 'cancelled', 'completed', 'delivered_pending', 'draft') DEFAULT 'pending'");
+        if (\DB::getDriverName() === 'mysql') {
+            \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM('pending', 'assigned', 'cancelled', 'completed', 'delivered_pending', 'draft') DEFAULT 'pending'");
+        }
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
-        \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM('pending', 'assigned', 'cancelled', 'completed', 'delivered_pending', 'draft') DEFAULT 'draft'");
+        if (\DB::getDriverName() === 'mysql') {
+            \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM('pending', 'assigned', 'cancelled', 'completed', 'delivered_pending', 'draft') DEFAULT 'draft'");
+        }
     }
 };

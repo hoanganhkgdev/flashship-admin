@@ -21,5 +21,6 @@ class AppServiceProvider extends ServiceProvider
     {
         \App\Models\Order::observe(\App\Observers\OrderObserver::class);
         \App\Models\Shift::observe(\App\Observers\ShiftObserver::class);
+        \App\Models\User::observe(\App\Observers\UserObserver::class);
     }
 }

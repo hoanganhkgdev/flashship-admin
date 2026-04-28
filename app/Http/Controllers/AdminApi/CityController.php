@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\AdminApi;
 
 use App\Http\Controllers\Controller;
-use App\Models\City;
+use App\Services\CityService;
 
 class CityController extends Controller
 {
+    public function __construct(private CityService $cities) {}
+
     public function index()
     {
-        return City::select('id', 'name')->orderBy('name')->get();
+        return response()->json($this->cities->getForSelect());
     }
 }

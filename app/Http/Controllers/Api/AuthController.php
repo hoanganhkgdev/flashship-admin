@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\LoginRequest;
+use App\Http\Requests\Auth\RegisterRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
@@ -14,69 +17,55 @@ class AuthController extends Controller
     /**
      * Đăng ký
      */
-    public function register(Request $request)
+    public function register(RegisterRequest $request)
     {
-        $data = $request->validate([
-            'name' => 'required|string|max:255',
-            'phone' => 'required|string|unique:users',
-            'password' => 'required|string|min:6|confirmed',
-            'shift_ids' => 'sometimes|array',
-            'shift_ids.*' => 'exists:shifts,id',
-            'city_id' => 'required|exists:cities,id',
-            'profile_photo' => 'required|image|mimes:jpg,jpeg,png|max:2048',
-        ]);
+        $data = $request->validated();
 
-        // 🔹 Upload ảnh
+        // Upload ảnh trước transaction (tránh giữ connection lâu)
         $path = null;
         if ($request->hasFile('profile_photo')) {
             $path = $request->file('profile_photo')->store('profiles', 'public');
         }
 
-        // 🔹 Tạo user
-        $user = User::create([
-            'name' => $data['name'],
-            'phone' => $data['phone'],
-            'password' => bcrypt($data['password']),
-            'status' => 0, // chờ duyệt
-            'city_id' => $data['city_id'],
-            'profile_photo_path' => $path,
-        ]);
+        [$user, $token] = DB::transaction(function () use ($data, $path) {
+            $user = User::create([
+                'name'               => $data['name'],
+                'phone'              => $data['phone'],
+                'email'              => null,
+                'password'           => bcrypt($data['password']),
+                'status'             => 0,
+                'city_id'            => $data['city_id'],
+                'profile_photo_path' => $path,
+            ]);
 
-        // Gán role driver
-        $user->assignRole('driver');
+            $user->assignRole('driver');
 
-        // 🔹 Gắn ca làm việc vào bảng pivot shift_user (chỉ với gói weekly)
-        $plan = \App\Models\Plan::where('city_id', $data['city_id'])
-            ->where('is_active', true)
-            ->first();
-        $user->update(['plan_id' => $plan?->id]);
+            $plan = \App\Models\Plan::active()->forCity($data['city_id'])->first();
+            $user->update(['plan_id' => $plan?->id]);
 
-        if ($plan?->type === 'weekly' && !empty($data['shift_ids'])) {
-            $user->shifts()->sync($data['shift_ids']);
-        }
+            if ($plan?->type === \App\Models\Plan::TYPE_WEEKLY && !empty($data['shift_ids'])) {
+                $user->shifts()->sync($data['shift_ids']);
+            }
 
-        // 🔹 Tạo token đăng nhập
-        $token = $user->createToken('api_token')->plainTextToken;
+            $token = $user->createToken('api_token')->plainTextToken;
+
+            return [$user, $token];
+        });
 
         return response()->json([
             'success' => true,
             'message' => 'Đăng ký thành công, vui lòng chờ admin duyệt',
             'data' => [
-                'user' => $user->load('shifts', 'city'),
-                'token' => $token,
+                'user'              => $user->load('shifts', 'city'),
+                'token'             => $token,
                 'profile_photo_url' => $path ? asset('storage/' . $path) : null,
             ],
         ]);
     }
 
-    public function login(Request $request)
+    public function login(LoginRequest $request)
     {
-        $data = $request->validate([
-            'login'     => ['required', 'string'],
-            'password'  => ['required', 'string', 'min:6'],
-            'device_id' => ['nullable', 'string'],
-            'fcm_token' => ['nullable', 'string'],
-        ]);
+        $data = $request->validated();
 
         $field = filter_var($data['login'], FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';
         $user = User::where($field, $data['login'])->first();

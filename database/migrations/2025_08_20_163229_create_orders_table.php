@@ -11,8 +11,8 @@ return new class extends Migration {
             $table->id();
 
             // Người tạo đơn (admin / client)
-            $table->unsignedBigInteger('')->nullable();
-            $table->foreign('')
+            $table->unsignedBigInteger('client_id')->nullable();
+            $table->foreign('client_id')
                 ->references('id')
                 ->on('users')
                 ->onDelete('cascade');

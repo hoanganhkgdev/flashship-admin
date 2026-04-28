@@ -66,26 +66,10 @@ class MarkOverdueDebts extends Command
                 : $weeks->implode(', ');
 
             if ($driver->fcm_token) {
-                $title = '🚫 Công nợ tuần đã quá hạn';
-                $body = "Bạn có " . $driverDebts->count() . " công nợ tuần quá hạn (tổng: " . number_format($totalOverdue, 0, ',', '.') . "đ)\n" .
-                    "Các tuần: " . $weeksText . "\n" .
-                    "App đã khóa nhận đơn. Vui lòng thanh toán để tiếp tục hoạt động.";
-
-                $data = [
-                    'type' => 'weekly_debt_overdue',
-                    'count' => (string) $driverDebts->count(),
-                    'total_amount' => (string) $totalOverdue,
-                ];
-
-                try {
-                    \App\Helpers\FcmHelper::sendToMultiple([$driver->fcm_token], $title, $body, $data);
-
-                    // ✅ Lưu vào Lịch sử thông báo trên App (Database)
-                    $driver->notify(new \App\Notifications\DriverAppNotification($title, $body, 'error'));
-
-                    Log::info("✅ Đã gửi thông báo quá hạn FCM cho tài xế #{$driver->id}");
-                } catch (\Throwable $e) {
-                }
+                \App\Services\NotificationService::notifyWeeklyDebtOverdue(
+                    $driver, $driverDebts->count(), $totalOverdue, $weeksText
+                );
+                Log::info("✅ Gửi FCM công nợ tuần quá hạn cho tài xế #{$driver->id}");
             }
         }
 

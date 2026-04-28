@@ -3,24 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\Incident\StoreIncidentRequest;
 use App\Models\Incident;
-use App\Models\Order;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
 class IncidentController extends Controller
 {
-    public function store(Request $request)
+    public function store(StoreIncidentRequest $request)
     {
-        $request->validate([
-            'type' => 'required|string',
-            'description' => 'required|string',
-            'order_id' => 'nullable|exists:orders,id',
-            'latitude' => 'nullable|numeric',
-            'longitude' => 'nullable|numeric',
-            'image' => 'nullable|image|max:2048',
-        ]);
 
         try {
             $user = Auth::user();

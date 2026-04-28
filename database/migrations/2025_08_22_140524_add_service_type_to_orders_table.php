@@ -11,7 +11,7 @@ return new class extends Migration {
     public function up()
     {
         Schema::table('orders', function (Blueprint $table) {
-            $table->string('service_type')->default('delivery')->after('');
+            $table->string('service_type')->default('delivery')->after('client_id');
         });
     }
 

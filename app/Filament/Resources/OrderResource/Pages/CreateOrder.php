@@ -27,18 +27,6 @@ class CreateOrder extends CreateRecord
         return $data;
     }
 
-    protected function afterCreate(): void
-    {
-        $order = $this->record;
-
-        if ($order->delivery_man_id) {
-            $driver = \App\Models\User::find($order->delivery_man_id);
-            if ($driver) {
-                \App\Services\NotificationService::notifyOrderAssigned($order, $driver);
-            }
-        }
-    }
-
     /**
      * Chuẩn hóa giá trị phí:
      *   "15"     → 15000

@@ -2,50 +2,50 @@
 
 namespace App\Notifications;
 
+use App\Channels\FcmChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class DriverAppNotification extends Notification
+class DriverAppNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    protected $title;
-    protected $message;
-    protected $type; // info, warning, success, error, order, wallet
+    public function __construct(
+        private string  $title,
+        private string  $message,
+        private string  $type = 'info',
+        private array   $data = [],
+        private ?string $collapseId = null,
+    ) {}
 
-    /**
-     * Create a new notification instance.
-     */
-    public function __construct(string $title, string $message, string $type = 'info')
-    {
-        $this->title = $title;
-        $this->message = $message;
-        $this->type = $type;
-    }
-
-    /**
-     * Get the notification's delivery channels.
-     *
-     * @return array<int, string>
-     */
     public function via(object $notifiable): array
     {
-        return ['database']; // Lưu vào bảng notifications trong DB
+        $channels = ['database'];
+
+        if (!empty($notifiable->fcm_token)) {
+            $channels[] = FcmChannel::class;
+        }
+
+        return $channels;
     }
 
-    /**
-     * Get the array representation of the notification.
-     *
-     * @return array<string, mixed>
-     */
-    public function toArray(object $notifiable): array
+    public function toFcm(object $notifiable): array
     {
         return [
+            'title'       => $this->title,
+            'body'        => $this->message,
+            'data'        => array_merge($this->data, ['type' => $this->type]),
+            'collapse_id' => $this->collapseId,
+        ];
+    }
+
+    public function toArray(object $notifiable): array
+    {
+        return array_merge($this->data, [
             'title'   => $this->title,
             'message' => $this->message,
             'type'    => $this->type,
-        ];
+        ]);
     }
 }

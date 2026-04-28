@@ -12,11 +12,11 @@ return new class extends Migration
     public function up()
     {
         Schema::table('users', function (Blueprint $table) {
-    $table->enum('shift_type', ['morning', 'evening', 'night', 'full'])
-          ->default('full')
-          ->comment('morning: 6h-17h, evening: 15h-24h, night: 0h-2h, full: 24h')
-          ->change();
-});
+            $table->enum('shift_type', ['morning', 'evening', 'night', 'full'])
+                ->default('full')
+                ->nullable()
+                ->after('status');
+        });
     }
 
     public function down()

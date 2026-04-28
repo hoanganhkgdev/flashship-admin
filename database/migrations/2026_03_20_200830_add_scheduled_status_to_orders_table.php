@@ -8,29 +8,21 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Thêm 'scheduled' vào ENUM status
-        \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM(
-            'pending',
-            'assigned',
-            'delivering',
-            'cancelled',
-            'completed',
-            'delivered_pending',
-            'draft',
-            'scheduled'
-        ) DEFAULT 'pending'");
+        if (\DB::getDriverName() === 'mysql') {
+            \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM(
+                'pending', 'assigned', 'delivering', 'cancelled',
+                'completed', 'delivered_pending', 'draft', 'scheduled'
+            ) DEFAULT 'pending'");
+        }
     }
 
     public function down(): void
     {
-        \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM(
-            'pending',
-            'assigned',
-            'delivering',
-            'cancelled',
-            'completed',
-            'delivered_pending',
-            'draft'
-        ) DEFAULT 'pending'");
+        if (\DB::getDriverName() === 'mysql') {
+            \DB::statement("ALTER TABLE orders MODIFY COLUMN status ENUM(
+                'pending', 'assigned', 'delivering', 'cancelled',
+                'completed', 'delivered_pending', 'draft'
+            ) DEFAULT 'pending'");
+        }
     }
 };

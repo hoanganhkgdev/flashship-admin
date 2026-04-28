@@ -8,7 +8,10 @@ class DriverWallet extends Model
 {
     protected $fillable = ['driver_id', 'balance'];
 
-    public function transactions() {
+    protected $casts = ['balance' => 'float'];
+
+    public function transactions()
+    {
         return $this->hasMany(DriverWalletTransaction::class, 'wallet_id');
     }
 
@@ -16,5 +19,14 @@ class DriverWallet extends Model
     {
         return $this->belongsTo(User::class, 'driver_id');
     }
-}
 
+    public function scopeNegative($query)
+    {
+        return $query->where('balance', '<', 0);
+    }
+
+    public function scopePositive($query)
+    {
+        return $query->where('balance', '>=', 0);
+    }
+}

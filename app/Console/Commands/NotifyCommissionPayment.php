@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use App\Models\User;
 use App\Models\DriverDebt;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -38,29 +37,9 @@ class NotifyCommissionPayment extends Command
                 continue;
             }
 
-            $title = '💸 Nhắc thanh toán chiết khấu';
-            $body = "Ngày " . Carbon::parse($yesterday)->format('d/m/Y') .
-                " bạn cần thanh toán " . number_format($debt->amount_due, 0, ',', '.') . "đ chiết khấu.\n" .
-                "Vui lòng thanh toán trước 12h trưa hôm nay để tránh bị khóa nhận đơn.";
-
-            $data = [
-                'type' => 'daily_commission_reminder',
-                'debt_id' => (string) $debt->id,
-                'amount_due' => (string) $debt->amount_due,
-                'date' => (string) $yesterday->toDateString(),
-            ];
-
-            try {
-                \App\Helpers\FcmHelper::sendToMultiple([$playerId], $title, $body, $data);
-
-                // ✅ Lưu vào Lịch sử thông báo trên App (Database)
-                $driver->notify(new \App\Notifications\DriverAppNotification($title, $body, 'warning'));
-
-                Log::info("📩 Gửi FCM cho tài xế #{$driver->id}: nợ " . number_format($debt->amount_due) . "đ");
-                $count++;
-            } catch (\Throwable $e) {
-                Log::error("❌ Lỗi gửi FCM cho tài xế #{$driver->id}: " . $e->getMessage());
-            }
+            \App\Services\NotificationService::notifyCommissionDebtReminder($driver, $debt, $yesterday);
+            Log::info("📩 Gửi FCM nhắc chiết khấu cho tài xế #{$driver->id}: " . number_format($debt->amount_due) . 'đ');
+            $count++;
         }
 
         $this->info("✅ Đã gửi thông báo nhắc thanh toán cho {$count} tài xế gói chiết khấu (công nợ ngày {$yesterday->format('d/m/Y')}).");

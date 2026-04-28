@@ -2,9 +2,10 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
+use App\Models\Plan;
 use App\Models\User;
 use App\Services\FirebaseRTDBService;
+use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 class EndShiftCommand extends Command
@@ -20,7 +21,7 @@ class EndShiftCommand extends Command
         // Tài xế gói commission (Cần Thơ, ...) không bị ảnh hưởng
         $drivers = User::role('driver')
             ->whereHas('shifts', fn($q) => $q->where('code', $code))
-            ->whereHas('plan', fn($q) => $q->where('type', 'weekly'))
+            ->whereHas('plan', fn($q) => $q->where('type', Plan::TYPE_WEEKLY))
             ->where('is_online', true)
             ->with(['shifts', 'plan'])
             ->get();

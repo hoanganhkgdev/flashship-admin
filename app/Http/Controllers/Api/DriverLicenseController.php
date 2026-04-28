@@ -3,18 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\License\UploadLicenseRequest;
 use App\Models\DriverLicense;
 
 class DriverLicenseController extends Controller
 {
-    public function upload(Request $request)
+    public function upload(UploadLicenseRequest $request)
     {
         $user = $request->user();
-
-        $request->validate([
-            'image' => 'required|image|max:2048',
-        ]);
 
         $path = $request->file('image')->store('licenses', 'public');
 

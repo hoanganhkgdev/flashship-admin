@@ -38,7 +38,7 @@ class OrderResource extends Resource
 
     public static function getNavigationGroup(): ?string
     {
-        return null;
+        return 'ĐƠN HÀNG';
     }
 
     public static function form(Form $form): Form
@@ -182,13 +182,9 @@ class OrderResource extends Resource
                     ])->columnSpan(4),
             ]),
 
-            // ─── 2. CHI TIẾT LỘ TRÌNH (ẨN ĐỐI VỚI ĐƠN THỦ CÔNG) ──────────────────
-            // 💡 Chỉ hiển thị khi đơn đã bóc tách qua AI hoặc AI tự tạo
-            Forms\Components\Section::make('Chi tiết địa chỉ (Dành cho AI)')
-                ->description('AI sẽ tự điền phần này cho lộ trình thông minh.')
+            Forms\Components\Section::make('Chi tiết lộ trình')
                 ->collapsible()
-                ->collapsed() // 👉 Mặc định luôn thu gọn
-                ->hidden(fn($get) => !$get('is_ai_created')) // 👉 ẨN HOÀN TOÀN nếu không phải AI created/parsed
+                ->collapsed()
                 ->icon('heroicon-m-map-pin')
                 ->schema([
                     Forms\Components\Grid::make(2)->schema([
@@ -204,10 +200,6 @@ class OrderResource extends Resource
                             ]),
                     ]),
                 ]),
-
-            // CÁC TRƯỜNG ẨN
-            Forms\Components\Hidden::make('is_ai_created')
-                ->default(false),
         ]);
     }
     public static function table(Table $table): Table
@@ -220,12 +212,8 @@ class OrderResource extends Resource
                 TextColumn::make('id')
                     ->label('#ID Order')
                     ->formatStateUsing(function ($state, $record) {
-                        $icon = $record->is_ai_created
-                            ? "<span title='Đơn hàng từ AI' class='text-[14px] opacity-70'>🤖</span>"
-                            : "<span title='Đơn hàng hand' class='text-[14px] opacity-70'>👤</span>";
-                        return "<div class='flex items-center gap-1.5 leading-none'>
+                            return "<div class='flex items-center gap-1.5 leading-none'>
                                     <div class='text-slate-700 text-[13px] tracking-tighter'>#{$state}</div>
-                                    {$icon}
                                 </div>";
                     })->html(),
 
@@ -366,14 +354,6 @@ class OrderResource extends Resource
                         'motor' => 'Lái xe máy',
                         'car' => 'Lái xe ô tô',
                     ]),
-
-                SelectFilter::make('is_ai_created')
-                    ->label('Nguồn đơn')
-                    ->options([
-                        '1' => 'Đơn từ AI',
-                        '0' => 'Đơn Tổng đài',
-                    ])
-                    ->placeholder('Tất cả'),
 
                 Filter::make('created_at')
                     ->form([
@@ -583,14 +563,15 @@ class OrderResource extends Resource
                                         'cancelled' => 'heroicon-m-x-circle',
                                         default => 'heroicon-m-question-mark-circle',
                                     })
-                                    ->colors([
-                                        'info' => 'draft',
-                                        'warning' => 'pending',
-                                        'primary' => 'assigned',
-                                        'indigo' => 'delivering',
-                                        'success' => 'completed',
-                                        'danger' => 'cancelled',
-                                    ])
+                                    ->color(fn($state) => match ($state) {
+                                        'draft'     => 'info',
+                                        'pending'   => 'warning',
+                                        'assigned'  => 'primary',
+                                        'delivering' => 'indigo',
+                                        'completed' => 'success',
+                                        'cancelled' => 'danger',
+                                        default     => 'gray',
+                                    })
                                     ->formatStateUsing(fn($state) => match ($state) {
                                         'draft' => 'ĐƠN AI ĐỢI DUYỆT',
                                         'pending' => 'CHỜ XỬ LÝ',
@@ -656,7 +637,7 @@ class OrderResource extends Resource
                             ->schema([
                                 Components\TextEntry::make('id')->label('Mã đơn hàng')->copyable()->prefix('#'),
                                 Components\TextEntry::make('service_type')->label('Dịch vụ')->badge()->color('gray'),
-                                Components\TextEntry::make('is_ai_created')->label('Nguồn đơn')->formatStateUsing(fn($state) => $state ? 'Trí tuệ nhân tạo (AI)' : 'Điều hành viên (CMS)'),
+                                Components\TextEntry::make('service_type')->label('Loại dịch vụ')->badge()->color('gray'),
                             ]),
                     ])->columnSpan(4),
                 ]),
@@ -709,17 +690,15 @@ class OrderResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery();
+        $query = parent::getEloquentQuery()->with(['driver', 'city']);
+
         $user = auth()->user();
 
-        // 🔹 Nếu là admin => lọc theo khu vực đang chọn (nếu có), không thì hiện tất cả
         if ($user->hasRole('admin')) {
-            if (session()->has('current_city_id')) {
-                $query->where('city_id', session('current_city_id'));
+            if ($cityId = session('current_city_id')) {
+                $query->where('city_id', $cityId);
             }
-        }
-        // 🔹 Còn lại (manager, dispatcher...) => chỉ xem vùng cố định của họ
-        elseif ($user->hasAnyRole(['manager', 'dispatcher'])) {
+        } elseif ($user->hasAnyRole(['manager', 'dispatcher'])) {
             $query->where('city_id', $user->city_id);
         }
 

@@ -4,22 +4,16 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\DriverDebtResource\Pages;
 use App\Models\DriverDebt;
+use Carbon\Carbon;
 use Filament\Forms;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
-use Filament\Tables\Table;
-use Filament\Tables\Columns;
-use Filament\Tables\Grouping\Group;
-use Carbon\Carbon;
-use Filament\Tables\Columns\Summarizers\Sum;
-use pxlrbt\FilamentExcel\Actions\Tables\ExportAction;
-use pxlrbt\FilamentExcel\Exports\ExcelExport;
-use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\Filter;
-use Filament\Tables\Columns\Layout\Get;
+use Filament\Tables\Table;
+use pxlrbt\FilamentExcel\Actions\Tables\ExportAction;
 use pxlrbt\FilamentExcel\Columns\Column;
-use Illuminate\Support\Facades\DB;
-use Filament\Navigation\NavigationItem;
+use pxlrbt\FilamentExcel\Exports\ExcelExport;
 
 class DriverDebtResource extends Resource
 {
@@ -53,38 +47,36 @@ class DriverDebtResource extends Resource
                 ])
                 ->default('commission')
                 ->required()
-                ->reactive()
-                ->afterStateUpdated(function ($state, callable $set) {
+                ->live()
+                ->afterStateUpdated(function (Forms\Set $set) {
                     $set('date', null);
                     $set('week_start', null);
                     $set('week_end', null);
                 }),
 
-            // 🔹 Field date chỉ hiển thị khi chọn "Chiết khấu"
             Forms\Components\DatePicker::make('date')
                 ->label('Ngày')
                 ->displayFormat('d/m/Y')
-                ->required(fn($get) => $get('debt_type') === 'commission')
-                ->visible(fn($get) => $get('debt_type') === 'commission'),
+                ->required(fn(Forms\Get $get) => $get('debt_type') === 'commission')
+                ->visible(fn(Forms\Get $get) => $get('debt_type') === 'commission'),
 
-            // 🔹 Field week_start và week_end chỉ hiển thị khi chọn "Theo tuần"
             Forms\Components\DatePicker::make('week_start')
                 ->label('Từ ngày')
                 ->displayFormat('d/m/Y')
-                ->required(fn($get) => $get('debt_type') === 'weekly')
-                ->visible(fn($get) => $get('debt_type') === 'weekly'),
+                ->required(fn(Forms\Get $get) => $get('debt_type') === 'weekly')
+                ->visible(fn(Forms\Get $get) => $get('debt_type') === 'weekly'),
 
             Forms\Components\DatePicker::make('week_end')
                 ->label('Đến ngày')
                 ->displayFormat('d/m/Y')
-                ->required(fn($get) => $get('debt_type') === 'weekly')
-                ->visible(fn($get) => $get('debt_type') === 'weekly')
+                ->required(fn(Forms\Get $get) => $get('debt_type') === 'weekly')
+                ->visible(fn(Forms\Get $get) => $get('debt_type') === 'weekly')
                 ->after('week_start')
                 ->rules([
-                    fn($get) => function (string $attribute, $value, \Closure $fail) use ($get) {
+                    fn(Forms\Get $get) => function (string $attribute, $value, \Closure $fail) use ($get) {
                         if ($get('debt_type') === 'weekly' && $get('week_start') && $value) {
                             $start = \Carbon\Carbon::parse($get('week_start'));
-                            $end = \Carbon\Carbon::parse($value);
+                            $end   = \Carbon\Carbon::parse($value);
                             if ($end->lt($start)) {
                                 $fail('Đến ngày phải lớn hơn hoặc bằng Từ ngày.');
                             }
@@ -132,16 +124,18 @@ class DriverDebtResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('stt')
-                    ->label('STT')
-                    ->rowIndex()
-                    ->alignCenter(),
+                Tables\Columns\ImageColumn::make('driver.profile_photo_path')
+                    ->label('')
+                    ->circular()
+                    ->defaultImageUrl(fn($record) => 'https://ui-avatars.com/api/?name=' . urlencode($record->driver?->name ?? '?') . '&color=ffffff&background=6d28d9')
+                    ->size(40),
 
                 Tables\Columns\TextColumn::make('driver.name')
                     ->label('Tài xế')
                     ->searchable()
                     ->sortable()
-                    ->weight('bold'),
+                    ->weight('bold')
+                    ->description(fn($record) => $record->driver?->phone ?? ''),
 
                 Tables\Columns\TextColumn::make('date')
                     ->date('d/m/Y')
@@ -209,16 +203,54 @@ class DriverDebtResource extends Resource
                     ->formatStateUsing(fn($state) => match ($state) {
                         'pending' => 'Chưa thu',
                         'overdue' => 'Quá hạn',
-                        'paid' => 'Hoàn tất',
-                        default => $state,
+                        'paid'    => 'Hoàn tất',
+                        default   => $state,
                     })
-                    ->colors([
-                        'danger' => 'pending',
-                        'warning' => 'overdue',
-                        'success' => 'paid',
-                    ]),
+                    ->color(fn($state) => match ($state) {
+                        'pending' => 'danger',
+                        'overdue' => 'warning',
+                        'paid'    => 'success',
+                        default   => 'gray',
+                    }),
 
-            ])->actions([Tables\Actions\EditAction::make()->iconButton(), Tables\Actions\DeleteAction::make()->iconButton()])
+            ])->actions([
+                Tables\Actions\Action::make('collect_commission')
+                    ->label('Thu tiền')
+                    ->icon('heroicon-o-banknotes')
+                    ->color('success')
+                    ->iconButton()
+                    ->tooltip('Thu tiền công nợ')
+                    ->visible(fn($record) => in_array($record->status, ['pending', 'overdue']))
+                    ->form([
+                        Forms\Components\TextInput::make('amount')
+                            ->label('Số tiền thu (₫)')
+                            ->numeric()
+                            ->minValue(1)
+                            ->required()
+                            ->default(fn($record) => $record->amount_due - $record->amount_paid),
+                        Forms\Components\Textarea::make('note')
+                            ->label('Ghi chú')
+                            ->rows(2),
+                    ])
+                    ->action(function ($record, array $data) {
+                        $remaining = $record->amount_due - $record->amount_paid;
+                        $collected = min((float) $data['amount'], $remaining);
+                        $record->amount_paid += $collected;
+                        if ($record->amount_paid >= $record->amount_due) {
+                            $record->status = 'paid';
+                        }
+                        if (!empty($data['note'])) {
+                            $record->note = $data['note'];
+                        }
+                        $record->save();
+                        Notification::make()
+                            ->title('Đã thu ' . number_format($collected, 0, ',', '.') . '₫')
+                            ->success()->send();
+                    }),
+
+                Tables\Actions\EditAction::make()->iconButton(),
+                Tables\Actions\DeleteAction::make()->iconButton(),
+            ])
             ->headerActions([
                 ExportAction::make()
                     ->label('Xuất Excel')
@@ -226,7 +258,6 @@ class DriverDebtResource extends Resource
                         ExcelExport::make()
                             ->fromModel()
                             ->modifyQueryUsing(function ($query) {
-                                // Sử dụng query từ getEloquentQuery để có filter city, sau đó thêm filter debt_type
                                 $baseQuery = static::getEloquentQuery();
                                 return $baseQuery->where('debt_type', 'commission');
                             })
@@ -268,17 +299,18 @@ class DriverDebtResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('stt')
-                    ->label('STT')
-                    ->rowIndex()
-                    ->alignCenter(),
+                Tables\Columns\ImageColumn::make('driver.profile_photo_path')
+                    ->label('')
+                    ->circular()
+                    ->defaultImageUrl(fn($record) => 'https://ui-avatars.com/api/?name=' . urlencode($record->driver?->name ?? '?') . '&color=ffffff&background=6d28d9')
+                    ->size(40),
 
                 Tables\Columns\TextColumn::make('driver.name')
                     ->label('Tài xế')
-                    ->getStateUsing(fn($record) => ($record->driver?->name ?? '') . ' - ' . ($record->driver?->phone ?? '—'))
                     ->searchable()
                     ->sortable()
-                    ->weight('bold'),
+                    ->weight('bold')
+                    ->description(fn($record) => $record->driver?->phone ?? ''),
 
                 Tables\Columns\TextColumn::make('week_start')
                     ->label('Chu kỳ tuần')
@@ -311,16 +343,54 @@ class DriverDebtResource extends Resource
                     ->formatStateUsing(fn($state) => match ($state) {
                         'pending' => 'Chưa thu',
                         'overdue' => 'Quá hạn',
-                        'paid' => 'Hoàn tất',
-                        default => $state,
+                        'paid'    => 'Hoàn tất',
+                        default   => $state,
                     })
-                    ->colors([
-                        'danger' => 'pending',
-                        'warning' => 'overdue',
-                        'success' => 'paid',
-                    ]),
+                    ->color(fn($state) => match ($state) {
+                        'pending' => 'danger',
+                        'overdue' => 'warning',
+                        'paid'    => 'success',
+                        default   => 'gray',
+                    }),
 
-            ])->actions([Tables\Actions\EditAction::make()->iconButton(), Tables\Actions\DeleteAction::make()->iconButton()])
+            ])->actions([
+                Tables\Actions\Action::make('collect_weekly')
+                    ->label('Thu tiền')
+                    ->icon('heroicon-o-banknotes')
+                    ->color('success')
+                    ->iconButton()
+                    ->tooltip('Thu tiền công nợ')
+                    ->visible(fn($record) => in_array($record->status, ['pending', 'overdue']))
+                    ->form([
+                        Forms\Components\TextInput::make('amount')
+                            ->label('Số tiền thu (₫)')
+                            ->numeric()
+                            ->minValue(1)
+                            ->required()
+                            ->default(fn($record) => $record->amount_due - $record->amount_paid),
+                        Forms\Components\Textarea::make('note')
+                            ->label('Ghi chú')
+                            ->rows(2),
+                    ])
+                    ->action(function ($record, array $data) {
+                        $remaining = $record->amount_due - $record->amount_paid;
+                        $collected = min((float) $data['amount'], $remaining);
+                        $record->amount_paid += $collected;
+                        if ($record->amount_paid >= $record->amount_due) {
+                            $record->status = 'paid';
+                        }
+                        if (!empty($data['note'])) {
+                            $record->note = $data['note'];
+                        }
+                        $record->save();
+                        Notification::make()
+                            ->title('Đã thu ' . number_format($collected, 0, ',', '.') . '₫')
+                            ->success()->send();
+                    }),
+
+                Tables\Actions\EditAction::make()->iconButton(),
+                Tables\Actions\DeleteAction::make()->iconButton(),
+            ])
             ->filters([
                 Filter::make('week_start')
                     ->label('Lọc theo tuần')
@@ -443,17 +513,12 @@ class DriverDebtResource extends Resource
         $query = parent::getEloquentQuery();
         $user = auth()->user();
 
-        // 👑 Admin: lọc theo vùng đang chọn (session)
         if ($user->hasRole('admin')) {
-            if (session()->has('current_city_id')) {
-                $cityId = session('current_city_id');
+            if ($cityId = session('current_city_id')) {
                 $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
             }
-        }
-        // 👨‍💼 Manager / Dispatcher: chỉ xem công nợ trong city của họ
-        elseif ($user->hasAnyRole(['manager', 'dispatcher'])) {
-            $cityId = $user->city_id;
-            $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
+        } elseif ($user->hasAnyRole(['manager', 'dispatcher'])) {
+            $query->whereHas('driver', fn($q) => $q->where('city_id', $user->city_id));
         }
 
         // Không join daily_orders ở đây vì chỉ cần cho commission

@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 
 class CalculateDailyCommission extends Command
 {
-    protected $signature = 'debt:calculate-daily-commission {--date= : Ngày tính công nợ (YYYY-MM-DD)}';
+    protected $signature = 'debt:calculate-daily-commission {--date= : Ngày tính công nợ (YYYY-MM-DD)} {--city= : Lọc theo city_id (bỏ trống = toàn hệ thống)}';
     protected $description = 'Tính công nợ chiết khấu theo ngày vào 12h khuya (tính cho ngày hôm trước)';
 
     public function handle()
@@ -26,19 +26,24 @@ class CalculateDailyCommission extends Command
         $start = $calcDate->copy()->startOfDay()->toDateTimeString();
         $end = $calcDate->copy()->endOfDay()->toDateTimeString();
 
-        $this->info("🔄 Bắt đầu tính công nợ chiết khấu cho ngày: {$dateString} ({$start} → {$end})");
+        $cityId = $this->option('city') ? (int) $this->option('city') : null;
+        $cityLabel = $cityId ? " (city_id={$cityId})" : ' (toàn hệ thống)';
+        $this->info("🔄 Bắt đầu tính công nợ chiết khấu cho ngày: {$dateString} ({$start} → {$end}){$cityLabel}");
 
         // Lấy tất cả tài xế có gói chiết khấu % ĐANG ACTIVE HOẶC có % riêng
+        // Loại trừ tài xế gói free — không tính công nợ, không tính phí app
         $drivers = User::drivers()
             ->where(function ($query) {
                 $query->whereHas('plan', fn($q) => $q->where('type', 'commission')->where('is_active', true))
                     ->orWhereNotNull('custom_commission_rate');
             })
+            ->whereDoesntHave('plan', fn($q) => $q->where('type', 'free'))
+            ->when($cityId, fn($q) => $q->where('city_id', $cityId))
             ->with(['plan'])
             ->where('status', 1)
             ->get();
 
-        $this->info("👥 Tìm thấy {$drivers->count()} tài xế gói chiết khấu active");
+        $this->info("👥 Tìm thấy {$drivers->count()} tài xế gói chiết khấu active{$cityLabel}");
 
         $totalProcessed = 0;
         $totalDebtAmount = 0;
@@ -46,14 +51,24 @@ class CalculateDailyCommission extends Command
         foreach ($drivers as $driver) {
             $plan = $driver->plan;
 
-            // ✅ Đọc commission_rate từ driver, hoặc từ plan, fallback 15% nếu chưa set
-            $commissionRate = $driver->custom_commission_rate ?? $plan->commission_rate ?? 15;
+            // Bỏ qua tài xế gói free — không tính công nợ, không tính phí app
+            if ($plan?->type === 'free') {
+                $this->line("  ⏭ Tài xế #{$driver->id} gói free — bỏ qua.");
+                continue;
+            }
 
-            // ✅ Đếm đơn TRƯỚC — điều kiện quyết định có tính nợ không
-            $completedCount = Order::where('delivery_man_id', $driver->id)
+            // ✅ Đọc commission_rate từ driver, hoặc từ plan, fallback 15% nếu chưa set
+            $commissionRate = $driver->custom_commission_rate ?? $plan?->commission_rate ?? 15;
+
+            // ✅ Gộp count + sum thành 1 query — tránh N+1
+            $stats = Order::where('delivery_man_id', $driver->id)
                 ->whereBetween('completed_at', [$start, $end])
                 ->where('status', 'completed')
-                ->count();
+                ->selectRaw('COUNT(*) as total_count, SUM(shipping_fee) as total_earning')
+                ->first();
+
+            $completedCount = (int) ($stats->total_count ?? 0);
+            $totalEarning   = (float) ($stats->total_earning ?? 0);
 
             // ✅ Không có đơn nào → chỉ xóa bản ghi pending (không xóa paid/overdue)
             if ($completedCount <= 0) {
@@ -66,14 +81,8 @@ class CalculateDailyCommission extends Command
                 continue;
             }
 
-            // Tính tổng thu nhập
-            $totalEarning = Order::where('delivery_man_id', $driver->id)
-                ->whereBetween('completed_at', [$start, $end])
-                ->where('status', 'completed')
-                ->sum('shipping_fee');
-
-            // Phí app: CHỂ tính khi tài xế CÓ đơn trong ngày
-            $appFee = in_array($driver->city_id, [1, 2]) ? 3000 : 0;
+            // Phí app từ Settings — fallback 0 nếu chưa cấu hình
+            $appFee = (int) optional(\App\Models\Setting::where('key', 'app_fee_city_' . $driver->city_id)->first())->value ?: 0;
 
             // Tính tiền chiết khấu
             $commissionAmount = $totalEarning * $commissionRate / 100;
@@ -128,41 +137,18 @@ class CalculateDailyCommission extends Command
         Log::info("Debt calculation completed for {$dateString}: {$totalProcessed} drivers, total debt: " . number_format($totalDebtAmount) . "đ");
     }
 
-    protected function sendDebtNotification($driver, $debt, $date, $totalEarning, $orderCount, $rate, $appFee = 0)
+    protected function sendDebtNotification($driver, $debt, $date, $totalEarning, $orderCount, $rate, $appFee = 0): void
     {
-        $playerId = $driver->fcm_token;
-        if (!$playerId) {
-            Log::info("⚠️ Tài xế {$driver->id} ({$driver->name}) chưa có FCM Token, bỏ qua thông báo.");
+        if (!$driver->fcm_token) {
+            Log::info("⚠️ Tài xế #{$driver->id} chưa có FCM Token, bỏ qua thông báo.");
             return;
         }
 
-        $dateFormatted = Carbon::parse($date)->format('d/m/Y');
-        $title = '💸 Công nợ chiết khấu ngày ' . $dateFormatted;
+        \App\Services\NotificationService::notifyCommissionDebtCreated(
+            $driver, $debt, $totalEarning, $orderCount, $rate, $appFee
+        );
 
-        $commissionAmount = $totalEarning * $rate / 100;
-        $body = "Tổng thu nhập: " . number_format($totalEarning, 0, ',', '.') . "đ ({$orderCount} đơn)\n" .
-            "Chiết khấu {$rate}%: " . number_format($commissionAmount, 0, ',', '.') . "đ";
-
-        if ($appFee > 0) {
-            $body .= "\nPhí App duy trì: " . number_format($appFee, 0, ',', '.') . "đ";
-        }
-
-        $body .= "\n------------------\n";
-        $body .= "Tổng cộng cần nộp: " . number_format($debt->amount_due, 0, ',', '.') . "đ";
-
-        $data = [
-            'type' => 'commission_debt_created',
-            'debt_id' => (string) $debt->id,
-            'amount_due' => (string) $debt->amount_due,
-            'date' => (string) $date,
-        ];
-
-        try {
-            \App\Helpers\FcmHelper::sendToMultiple([$playerId], $title, $body, $data);
-            Log::info("✅ Đã gửi thông báo FCM cho tài xế #{$driver->id} - Công nợ: " . number_format($debt->amount_due) . "đ");
-        } catch (\Throwable $e) {
-            Log::error("❌ Lỗi gửi FCM cho tài xế #{$driver->id}: " . $e->getMessage());
-        }
+        Log::info("✅ Gửi FCM công nợ chiết khấu cho tài xế #{$driver->id} - " . number_format($debt->amount_due) . 'đ');
     }
 }
 

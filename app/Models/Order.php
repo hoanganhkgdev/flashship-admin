@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\Traits\HasCityScope;
 
 class Order extends Model
 {
-    use HasCityScope;
+    use HasFactory, HasCityScope;
 
     protected static function booted()
     {
@@ -28,16 +29,10 @@ class Order extends Model
             $order->shipping_fee = $order->shipping_fee ?? 0;
             $order->is_freeship = $order->is_freeship ?? false;
         });
-        static::created(function ($order) {
-            \App\Services\FirebaseRTDBService::publishOrderEvent($order);
-        });
-
-        static::updated(function ($order) {
-            \App\Services\FirebaseRTDBService::publishOrderEvent($order);
-        });
     }
 
     protected $fillable = [
+        'code',
         'pickup_address',
         'pickup_phone',
         'sender_name',
@@ -50,11 +45,9 @@ class Order extends Model
         'shipping_fee',
         'service_type',
         'order_note',
-        'is_ai_created',
         'is_freeship',
         'bonus_fee',
         'distance',
-        'shop_id',
         'completed_at',
         'delivered_at',
         'scheduled_at',
@@ -67,7 +60,6 @@ class Order extends Model
     protected $casts = [
         'delivery_man_id' => 'integer',
         'city_id' => 'integer',
-        'is_ai_created' => 'boolean',
         'is_freeship' => 'boolean',
         'completed_at' => 'datetime',
         'delivered_at' => 'datetime',
@@ -82,11 +74,6 @@ class Order extends Model
     public function city()
     {
         return $this->belongsTo(City::class);
-    }
-
-    public function shop()
-    {
-        return $this->belongsTo(Shop::class);
     }
 
     protected $appends = ['city_name'];

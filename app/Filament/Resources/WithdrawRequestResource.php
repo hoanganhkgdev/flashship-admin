@@ -4,20 +4,16 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\WithdrawRequestResource\Pages;
 use App\Models\WithdrawRequest;
-use Filament\Forms;
-use Filament\Resources\Resource;
-use Filament\Tables;
-use Filament\Forms\Form;
-use Filament\Tables\Table;
 use App\Services\DriverWalletService;
 use App\Services\PayOSService;
-use Filament\Notifications\Notification;
-
-use App\Helpers\FcmHelper;
-use App\Services\BankCodeService;
-use Filament\Infolists\Infolist;
+use Filament\Forms;
 use Filament\Infolists\Components;
+use Filament\Infolists\Infolist;
+use Filament\Notifications\Notification;
+use Filament\Resources\Resource;
 use Filament\Support\Enums\FontWeight;
+use Filament\Tables;
+use Filament\Tables\Table;
 
 class WithdrawRequestResource extends Resource
 {
@@ -27,6 +23,11 @@ class WithdrawRequestResource extends Resource
     protected static ?string $modelLabel = 'yêu cầu rút tiền';
     protected static ?string $pluralModelLabel = 'Danh sách yêu cầu rút tiền';
     protected static ?int $navigationSort = 1;
+
+    public static function getNavigationGroup(): ?string
+    {
+        return 'TÀI CHÍNH';
+    }
 
     public static function getNavigationBadge(): ?string
     {
@@ -38,97 +39,147 @@ class WithdrawRequestResource extends Resource
         return 'warning';
     }
 
-
-    public static function getNavigationGroup(): ?string
+    /**
+     * Xử lý PayOS payout — dùng chung cho approve và retry action.
+     * Trả về ['success' => bool, 'message' => string]
+     */
+    public static function executePayout(WithdrawRequest $record, bool $isRetry = false): array
     {
-        return 'TÀI CHÍNH';
-    }
+        $bank = $record->driver?->bank;
 
-    public static function form(Form $form): Form
-    {
-        return $form->schema([
-            Forms\Components\Select::make('status')
-                ->options([
-                    'pending' => 'Đang chờ',
-                    'approved' => 'Đã duyệt',
-                    'rejected' => 'Từ chối',
-                    'failed' => 'Thất bại',
-                ])
-                ->required(),
-            Forms\Components\Textarea::make('note'),
-        ]);
+        if (!$bank || !$bank->bank_code || !$bank->bank_account) {
+            return ['success' => false, 'message' => 'Tài xế chưa cấu hình ngân hàng'];
+        }
+
+        $ref  = $isRetry ? "WD-{$record->id}-" . time() : "WD-{$record->id}";
+        $desc = $isRetry ? "Retry Payout ID {$record->id}" : "Payout ID {$record->id}";
+
+        $result = (new PayOSService('payout'))->createPayout(
+            $ref,
+            (int) $record->amount,
+            $bank->bank_code,
+            $bank->bank_account,
+            $desc
+        );
+
+        if (isset($result['code']) && $result['code'] === '00') {
+            $record->update(['status' => 'approved', 'note' => null]);
+            \App\Services\NotificationService::notifyWithdrawStatus($record, 'approved');
+            return ['success' => true, 'message' => 'Chuyển khoản thành công'];
+        }
+
+        $error = $result['message'] ?? 'Lỗi hệ thống PayOS';
+        $record->update(['status' => 'failed', 'note' => $error]);
+        return ['success' => false, 'message' => $error];
     }
 
     public static function infolist(Infolist $infolist): Infolist
     {
-        return $infolist
-            ->schema([
-                Components\Section::make('Thông tin yêu cầu')
-                    ->schema([
-                        Components\Grid::make(3)->schema([
-                            Components\TextEntry::make('driver.name')
-                                ->label('Tài xế yêu cầu')
-                                ->weight(FontWeight::Bold)
-                                ->color('primary'),
-                            Components\TextEntry::make('amount')
-                                ->label('Số tiền rút')
-                                ->money('VND')
-                                ->weight(FontWeight::Bold)
-                                ->color('success'),
-                            Components\TextEntry::make('status')
-                                ->label('Trạng thái')
-                                ->badge()
-                                ->formatStateUsing(fn($state) => match ($state) {
-                                    'pending' => 'Đang chờ',
-                                    'approved' => 'Thành công',
-                                    'rejected' => 'Đã từ chối',
-                                    'failed' => 'Thất bại',
-                                    default => $state,
-                                })
-                                ->colors([
-                                    'warning' => 'pending',
-                                    'success' => 'approved',
-                                    'danger' => 'rejected',
-                                    'gray' => 'failed',
-                                ]),
-                        ]),
-                    ]),
+        return $infolist->schema([
+            Components\Section::make('Thông tin tài xế')
+                ->columns(4)
+                ->schema([
+                    Components\ImageEntry::make('driver.profile_photo_path')
+                        ->label('')
+                        ->circular()
+                        ->defaultImageUrl(fn($record) => 'https://ui-avatars.com/api/?name=' . urlencode($record->driver?->name ?? '?') . '&color=ffffff&background=6d28d9')
+                        ->size(72),
 
-                Components\Section::make('Thông tin thụ hưởng')
-                    ->icon('heroicon-o-credit-card')
-                    ->schema([
-                        Components\Grid::make(3)->schema([
-                            Components\TextEntry::make('driver.bank.bank_owner')
-                                ->label('Tên chủ tài khoản')
-                                ->placeholder('Chưa cài đặt'),
-                            Components\TextEntry::make('driver.bank.bank_code')
-                                ->label('Ngân hàng')
-                                ->placeholder('N/A'),
-                            Components\TextEntry::make('driver.bank.bank_account')
-                                ->label('Số tài khoản')
-                                ->placeholder('N/A')
-                                ->copyable(),
-                        ]),
-                    ]),
+                    Components\TextEntry::make('driver.name')
+                        ->label('Tài xế')
+                        ->weight(FontWeight::Bold)
+                        ->color('primary'),
 
-                Components\Section::make('Ghi chú hệ thống')
-                    ->schema([
-                        Components\TextEntry::make('note')
-                            ->label('Nội dung/Lý do')
-                            ->placeholder('Không có ghi chú')
-                            ->columnSpanFull(),
-                    ])->visible(fn($record) => filled($record->note)),
-            ]);
+                    Components\TextEntry::make('driver.phone')
+                        ->label('Số điện thoại'),
+
+                    Components\TextEntry::make('driver.city.name')
+                        ->label('Khu vực')
+                        ->badge()
+                        ->color('gray'),
+                ]),
+
+            Components\Section::make('Chi tiết yêu cầu')
+                ->columns(3)
+                ->schema([
+                    Components\TextEntry::make('amount')
+                        ->label('Số tiền rút')
+                        ->money('VND')
+                        ->weight(FontWeight::Bold)
+                        ->size(Components\TextEntry\TextEntrySize::Large)
+                        ->color('success'),
+
+                    Components\TextEntry::make('wallet_balance')
+                        ->label('Số dư ví hiện tại')
+                        ->getStateUsing(fn($record) => \App\Models\DriverWallet::where('driver_id', $record->driver_id)->value('balance') ?? 0)
+                        ->money('VND')
+                        ->color(fn($state) => $state < 0 ? 'danger' : 'primary'),
+
+                    Components\TextEntry::make('status')
+                        ->label('Trạng thái')
+                        ->badge()
+                        ->formatStateUsing(fn($state) => match ($state) {
+                            'pending'  => 'Đang chờ',
+                            'approved' => 'Thành công',
+                            'rejected' => 'Đã từ chối',
+                            'failed'   => 'Thất bại',
+                            default    => $state,
+                        })
+                        ->color(fn($state) => match ($state) {
+                            'pending'  => 'warning',
+                            'approved' => 'success',
+                            'rejected' => 'danger',
+                            'failed'   => 'gray',
+                            default    => 'gray',
+                        }),
+
+                    Components\TextEntry::make('created_at')
+                        ->label('Thời gian yêu cầu')
+                        ->dateTime('d/m/Y H:i'),
+
+                    Components\TextEntry::make('updated_at')
+                        ->label('Cập nhật lần cuối')
+                        ->dateTime('d/m/Y H:i')
+                        ->color('gray'),
+                ]),
+
+            Components\Section::make('Thông tin thụ hưởng')
+                ->icon('heroicon-o-credit-card')
+                ->columns(3)
+                ->schema([
+                    Components\TextEntry::make('driver.bank.bank_owner')
+                        ->label('Tên chủ tài khoản')
+                        ->placeholder('Chưa cài đặt'),
+
+                    Components\TextEntry::make('driver.bank.bank_code')
+                        ->label('Ngân hàng')
+                        ->placeholder('N/A'),
+
+                    Components\TextEntry::make('driver.bank.bank_account')
+                        ->label('Số tài khoản')
+                        ->placeholder('N/A')
+                        ->copyable(),
+                ]),
+
+            Components\Section::make('Ghi chú')
+                ->schema([
+                    Components\TextEntry::make('note')
+                        ->label('Nội dung / Lý do')
+                        ->placeholder('Không có ghi chú')
+                        ->columnSpanFull(),
+                ])->visible(fn($record) => filled($record->note)),
+        ]);
     }
 
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('stt')
-                    ->label('STT')
-                    ->rowIndex()
-                    ->alignCenter(),
+                Tables\Columns\ImageColumn::make('driver.profile_photo_path')
+                    ->label('')
+                    ->circular()
+                    ->defaultImageUrl(fn($record) => 'https://ui-avatars.com/api/?name=' . urlencode($record->driver?->name ?? '?') . '&color=ffffff&background=6d28d9')
+                    ->size(44),
 
                 Tables\Columns\TextColumn::make('driver.name')
                     ->label('Tài xế')
@@ -138,24 +189,15 @@ class WithdrawRequestResource extends Resource
 
                 Tables\Columns\TextColumn::make('bank_info')
                     ->label('Thông tin thụ hưởng')
-                    ->getStateUsing(function ($record) {
-                        $bank = $record->driver?->bank;
-                        if (!$bank)
-                            return 'Chưa cài đặt';
-                        return $bank->bank_owner ?? 'N/A';
-                    })
+                    ->getStateUsing(fn($record) => $record->driver?->bank?->bank_owner ?? 'Chưa cài đặt')
                     ->description(function ($record) {
                         $bank = $record->driver?->bank;
-                        if (!$bank)
-                            return null;
-                        $parts = array_filter([
-                            $bank->bank_name ?? $bank->bank_code,
-                            $bank->bank_account,
-                        ]);
-                        return \Illuminate\Support\Str::limit(implode(' · ', $parts), 20);
+                        if (!$bank) return null;
+                        return \Illuminate\Support\Str::limit(
+                            implode(' · ', array_filter([$bank->bank_name ?? $bank->bank_code, $bank->bank_account])),
+                            30
+                        );
                     })
-                    ->limit(20)
-                    ->tooltip(fn($state) => $state)
                     ->color('primary'),
 
                 Tables\Columns\TextColumn::make('amount')
@@ -176,12 +218,13 @@ class WithdrawRequestResource extends Resource
                         'failed'   => 'Thất bại',
                         default    => $state,
                     })
-                    ->colors([
-                        'warning' => 'pending',
-                        'success' => 'approved',
-                        'danger'  => 'rejected',
-                        'gray'    => 'failed',
-                    ]),
+                    ->color(fn($state) => match ($state) {
+                        'pending'  => 'warning',
+                        'approved' => 'success',
+                        'rejected' => 'danger',
+                        'failed'   => 'gray',
+                        default    => 'gray',
+                    }),
 
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Thời gian yêu cầu')
@@ -190,115 +233,72 @@ class WithdrawRequestResource extends Resource
                     ->color('gray'),
             ])
             ->defaultSort('created_at', 'desc')
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make()
-                        ->label('Xoá đã chọn'),
-                ]),
-            ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
                     ->label('Trạng thái')
                     ->options([
-                        'pending' => 'Đang chờ',
+                        'pending'  => 'Đang chờ',
                         'approved' => 'Thành công',
                         'rejected' => 'Đã từ chối',
-                        'failed' => 'Thất bại',
+                        'failed'   => 'Thất bại',
                     ]),
+
+                Tables\Filters\Filter::make('date_range')
+                    ->label('Khoảng thời gian')
+                    ->form([
+                        Forms\Components\DatePicker::make('from')->label('Từ ngày'),
+                        Forms\Components\DatePicker::make('until')->label('Đến ngày'),
+                    ])
+                    ->query(fn($query, array $data) => $query
+                        ->when($data['from'], fn($q, $d) => $q->whereDate('created_at', '>=', $d))
+                        ->when($data['until'], fn($q, $d) => $q->whereDate('created_at', '<=', $d))
+                    ),
             ])
             ->actions([
                 Tables\Actions\Action::make('approve_payout')
-                    ->label('Duyệt & Chuyển tiền (PayOS)')
+                    ->label('Duyệt & Chuyển tiền')
                     ->icon('heroicon-o-paper-airplane')
                     ->color('success')
                     ->iconButton()
-                    ->tooltip('Duyệt & Chuyển tiền')
+                    ->tooltip('Duyệt & Chuyển tiền qua PayOS')
                     ->requiresConfirmation()
                     ->visible(fn($record) => $record->status === 'pending')
                     ->action(function ($record) {
-                        $payos = new PayOSService('payout');
-                        $bank = $record->driver->bank;
-
-                        if (!$bank || !$bank->bank_code || !$bank->bank_account) {
-                            Notification::make()->title('Tài xế chưa cấu hình ngân hàng')->danger()->send();
-                            return;
-                        }
-
-                        $result = $payos->createPayout(
-                            "WD-" . $record->id,
-                            (int) $record->amount,
-                            $bank->bank_code,
-                            $bank->bank_account,
-                            "Payout ID " . $record->id
-                        );
-
-                        if (isset($result['code']) && $result['code'] === '00') {
-                            $record->update(['status' => 'approved']);
-                            \App\Services\NotificationService::notifyWithdrawStatus($record, 'approved');
-
-                            Notification::make()->title('Chuyển khoản thành công')->success()->send();
-                        } else {
-                            $errorMessage = $result['message'] ?? 'Lỗi hệ thống PayOS';
-                            $record->update(['status' => 'failed', 'note' => $errorMessage]);
-                            Notification::make()->title('Chuyển khoản thất bại')->body($errorMessage)->danger()->send();
-                        }
+                        $result = static::executePayout($record, false);
+                        $n = Notification::make()->title($result['message']);
+                        $result['success'] ? $n->success()->send() : $n->danger()->send();
                     }),
 
                 Tables\Actions\Action::make('retry_payout')
-                    ->label('Thử lại qua PayOS')
+                    ->label('Thử lại')
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
                     ->iconButton()
-                    ->tooltip('Thử lại chuyển khoản')
+                    ->tooltip('Thử lại chuyển khoản qua PayOS')
                     ->requiresConfirmation()
                     ->visible(fn($record) => $record->status === 'failed')
                     ->action(function ($record) {
-                        $payos = new PayOSService('payout');
-                        $bank = $record->driver->bank;
-
-                        if (!$bank || !$bank->bank_code || !$bank->bank_account) {
-                            Notification::make()->title('Tài xế chưa cấu hình ngân hàng')->danger()->send();
-                            return;
-                        }
-
-                        $result = $payos->createPayout(
-                            "WD-" . $record->id . "-" . time(),
-                            (int) $record->amount,
-                            $bank->bank_code,
-                            $bank->bank_account,
-                            "Retry Payout ID " . $record->id
-                        );
-
-                        if (isset($result['code']) && $result['code'] === '00') {
-                            $record->update(['status' => 'approved', 'note' => null]);
-                            \App\Services\NotificationService::notifyWithdrawStatus($record, 'approved');
-
-                            Notification::make()->title('Chuyển khoản thành công')->success()->send();
-                        } else {
-                            $errorMessage = $result['message'] ?? 'Lỗi hệ thống PayOS';
-                            $record->update(['note' => $errorMessage]);
-                            Notification::make()->title('Chuyển khoản vẫn thất bại')->body($errorMessage)->danger()->send();
-                        }
+                        $result = static::executePayout($record, true);
+                        $n = Notification::make()->title($result['message']);
+                        $result['success'] ? $n->success()->send() : $n->danger()->send();
                     }),
 
                 Tables\Actions\Action::make('reject')
-                    ->label('Từ chối yêu cầu')
+                    ->label('Từ chối')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
                     ->iconButton()
-                    ->tooltip('Từ chối & hoàn tiền')
+                    ->tooltip('Từ chối & hoàn tiền vào ví')
                     ->requiresConfirmation()
                     ->visible(fn($record) => in_array($record->status, ['pending', 'failed']))
                     ->form([
                         Forms\Components\Textarea::make('note')
                             ->label('Lý do từ chối')
-                            ->required(),
+                            ->required()
+                            ->rows(3),
                     ])
                     ->action(function ($record, array $data) {
-                        $record->update([
-                            'status' => 'rejected',
-                            'note' => $data['note'],
-                        ]);
+                        $record->update(['status' => 'rejected', 'note' => $data['note']]);
                         DriverWalletService::adjust(
                             $record->driver_id,
                             $record->amount,
@@ -306,10 +306,8 @@ class WithdrawRequestResource extends Resource
                             'Hoàn tiền yêu cầu rút #' . $record->id . ': ' . $data['note'],
                             'withdraw_reject_' . $record->id
                         );
-
                         \App\Services\NotificationService::notifyWithdrawStatus($record, 'rejected');
-
-                        Notification::make()->title('Đã từ chối và hoàn tiền')->success()->send();
+                        Notification::make()->title('Đã từ chối và hoàn tiền vào ví')->success()->send();
                     }),
 
                 Tables\Actions\ViewAction::make()
@@ -323,6 +321,11 @@ class WithdrawRequestResource extends Resource
                     ->iconButton()
                     ->tooltip('Xem hồ sơ tài xế')
                     ->url(fn($record) => DeliverymanResource::getUrl('view', ['record' => $record->driver_id])),
+            ])
+            ->bulkActions([
+                Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\DeleteBulkAction::make()->label('Xoá đã chọn'),
+                ]),
             ]);
     }
 
@@ -330,24 +333,23 @@ class WithdrawRequestResource extends Resource
     {
         return [
             'index' => Pages\ListWithdrawRequests::route('/'),
-            'edit' => Pages\EditWithdrawRequest::route('/{record}/edit'),
+            'view'  => Pages\ViewWithdrawRequest::route('/{record}'),
         ];
     }
 
-
     public static function canViewAny(): bool
     {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin']);
+        return auth()->check() && auth()->user()->hasAnyRole(['admin', 'manager', 'dispatcher']);
     }
 
     public static function canCreate(): bool
     {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin']);
+        return false;
     }
 
     public static function canEdit($record): bool
     {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin',]);
+        return false;
     }
 
     public static function canDelete($record): bool
@@ -357,18 +359,16 @@ class WithdrawRequestResource extends Resource
 
     public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
     {
-        $query = parent::getEloquentQuery();
+        $query = parent::getEloquentQuery()->with(['driver.bank', 'driver.city', 'driver.plan']);
+
         $user = auth()->user();
 
-        // 👑 Admin: xem theo vùng đang chọn
-        if ($user->hasRole('admin') && session()->has('current_city_id')) {
-            $cityId = session('current_city_id');
-            $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
-        }
-        // 👨‍💼 Manager / Dispatcher: cố định theo city_id của họ
-        elseif ($user->hasAnyRole(['manager', 'dispatcher'])) {
-            $cityId = $user->city_id;
-            $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
+        if ($user->hasRole('admin')) {
+            if ($cityId = session('current_city_id')) {
+                $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
+            }
+        } elseif ($user->hasAnyRole(['manager', 'dispatcher'])) {
+            $query->whereHas('driver', fn($q) => $q->where('city_id', $user->city_id));
         }
 
         return $query;

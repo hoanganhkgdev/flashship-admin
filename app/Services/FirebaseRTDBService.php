@@ -3,15 +3,8 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-/**
- * Firebase Realtime Database Service
- *
- * Dùng REST API của Firebase RTDB (không cần SDK nặng).
- * Yêu cầu: FIREBASE_DATABASE_URL và FIREBASE_SERVICE_ACCOUNT_PATH trong .env
- */
 class FirebaseRTDBService
 {
     protected static function getDatabaseUrl(): string
@@ -20,53 +13,19 @@ class FirebaseRTDBService
     }
 
     /**
-     * Lấy OAuth2 access token từ service account (cache 50 phút)
+     * Prefix namespace theo môi trường để local và production
+     * không đụng chung data dù dùng chung Firebase project.
+     * Production: /flashship/...
+     * Local/Staging: /flashship_local/... hoặc /flashship_staging/...
      */
+    protected static function ns(): string
+    {
+        return 'flashship_main';
+    }
+
     protected static function getAccessToken(): ?string
     {
-        return Cache::remember('firebase_rtdb_token', 50 * 60, function () {
-            try {
-                $serviceAccountPath = storage_path('app/firebase-service-account.json');
-                if (!file_exists($serviceAccountPath)) {
-                    Log::error('❌ RTDB: firebase-service-account.json không tồn tại');
-                    return null;
-                }
-
-                $serviceAccount = json_decode(file_get_contents($serviceAccountPath), true);
-
-                // Tạo JWT assertion
-                $now     = time();
-                $header  = base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
-                $payload = base64_encode(json_encode([
-                    'iss'   => $serviceAccount['client_email'],
-                    'scope' => 'https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email',
-                    'aud'   => 'https://oauth2.googleapis.com/token',
-                    'iat'   => $now,
-                    'exp'   => $now + 3600,
-                ]));
-
-                $signingInput = "$header.$payload";
-                $privateKey   = $serviceAccount['private_key'];
-
-                openssl_sign($signingInput, $signature, $privateKey, OPENSSL_ALGO_SHA256);
-                $jwt = "$signingInput." . base64_encode($signature);
-
-                $response = Http::asForm()->post('https://oauth2.googleapis.com/token', [
-                    'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-                    'assertion'  => $jwt,
-                ]);
-
-                if ($response->successful()) {
-                    return $response->json('access_token');
-                }
-
-                Log::error('❌ RTDB: Không lấy được access token: ' . $response->body());
-                return null;
-            } catch (\Throwable $e) {
-                Log::error('❌ RTDB: Lỗi getAccessToken: ' . $e->getMessage());
-                return null;
-            }
-        });
+        return FirebaseServiceAccount::getAccessToken(FirebaseServiceAccount::SCOPE_DATABASE);
     }
 
     /**
@@ -79,7 +38,7 @@ class FirebaseRTDBService
             $token = static::getAccessToken();
             if (!$token) return;
 
-            $path = "/flashship/orders/city_{$order->city_id}/order_{$order->id}.json";
+            $path = "/" . static::ns() . "/orders/city_{$order->city_id}/order_{$order->id}.json";
             $url  = static::getDatabaseUrl() . $path;
 
             $response = Http::withToken($token)->put($url, [
@@ -121,7 +80,7 @@ class FirebaseRTDBService
             $token = static::getAccessToken();
             if (!$token) return;
 
-            $path = "/flashship/orders/city_{$order->city_id}/order_{$order->id}.json";
+            $path = "/" . static::ns() . "/orders/city_{$order->city_id}/order_{$order->id}.json";
             $url  = static::getDatabaseUrl() . $path;
 
             $response = Http::withToken($token)->delete($url);
@@ -188,7 +147,7 @@ class FirebaseRTDBService
                 'updated_at'                => now()->toIso8601String(),
             ];
 
-            $path = "/flashship/drivers/driver_{$driver->id}.json";
+            $path = "/" . static::ns() . "/drivers/driver_{$driver->id}.json";
             $url  = static::getDatabaseUrl() . $path;
 
             $response = Http::withToken($token)->asJson()->put($url, $payload);
@@ -222,7 +181,7 @@ class FirebaseRTDBService
                 'updated_at' => now()->toIso8601String(),
             ];
 
-            $path = "/flashship/locations/driver_{$driverId}.json";
+            $path = "/" . static::ns() . "/locations/driver_{$driverId}.json";
             $url  = static::getDatabaseUrl() . $path;
 
             $response = Http::withToken($token)->asJson()->patch($url, $payload);
@@ -244,40 +203,12 @@ class FirebaseRTDBService
             $token = static::getAccessToken();
             if (!$token) return;
 
-            $path = "/flashship/locations/driver_{$driverId}.json";
+            $path = "/" . static::ns() . "/locations/driver_{$driverId}.json";
             $url  = static::getDatabaseUrl() . $path;
 
             Http::withToken($token)->delete($url);
         } catch (\Throwable $e) {
             Log::error("❌ RTDB: deleteDriverLocation exception driver#{$driverId}: " . $e->getMessage());
-        }
-    }
-
-    /**
-     * 🚀 Phát tín hiệu Realtime cho Admin (Danh sách đơn hàng, Dashboard...)
-     */
-    public static function publishOrderEvent($order): void
-    {
-        try {
-            $token = static::getAccessToken();
-            if (!$token) return;
-
-            $payload = [
-                'id'         => (int) $order->id,
-                'status'     => $order->status,
-                'city_id'    => (int) $order->city_id,
-                'updated_at' => now()->toIso8601String(),
-                'timestamp'  => time(),
-            ];
-
-            // Đẩy vào /flashship/events/orders để Admin lắng nghe
-            $path = "/flashship/events/orders.json";
-            $url  = static::getDatabaseUrl() . $path;
-
-            Http::withToken($token)->asJson()->put($url, $payload);
-            
-        } catch (\Throwable $e) {
-            Log::error("❌ RTDB: publishOrderEvent exception: " . $e->getMessage());
         }
     }
 }

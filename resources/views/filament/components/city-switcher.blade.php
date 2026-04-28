@@ -4,8 +4,8 @@
 
 @if($user && $user->hasRole('admin'))
     @php
-        $cities = \App\Models\City::orderBy('name')->get(['id', 'name']);
-        $current = session('current_city_id') ?? $user->city_id ?? 0;
+        $cities = \App\Models\City::active()->orderBy('name')->get(['id', 'name']);
+        $current = session('current_city_id') ?? 0;
         $currentCity = $cities->firstWhere('id', $current)?->name ?? 'Toàn quốc';
     @endphp
 
@@ -54,8 +54,24 @@
         >
             <div class="panel-header">Chọn khu vực làm việc</div>
             <div class="city-list">
+                {{-- Toàn quốc --}}
+                <a
+                    href="{{ route('admin.switch-city', 0) }}"
+                    class="city-item {{ $current == 0 ? 'active' : '' }}"
+                >
+                    <span class="item-bullet"></span>
+                    <span class="item-name">Toàn quốc</span>
+                    @if($current == 0)
+                        <div class="active-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </div>
+                    @endif
+                </a>
+
                 @foreach ($cities as $city)
-                    <a 
+                    <a
                         href="{{ route('admin.switch-city', $city->id) }}"
                         class="city-item {{ $current == $city->id ? 'active' : '' }}"
                     >

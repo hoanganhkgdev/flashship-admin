@@ -64,19 +64,6 @@ class UserResource extends Resource
                 ->dehydrateStateUsing(fn($state) => !empty($state) ? bcrypt($state) : null)
                 ->dehydrated(fn($state) => filled($state))
                 ->label('Mật khẩu'),
-
-            // 📱 Zalo cá nhân để nhận cảnh báo từ AI
-            \Filament\Forms\Components\Section::make('Zalo Thông Báo AI')
-                ->description('Khi AI nhận cảnh báo từ khách (khiếu nại, mất hàng...), hệ thống sẽ gửi tin nhắn Zalo trực tiếp vào đây.')
-                ->icon('heroicon-o-chat-bubble-bottom-center-text')
-                ->schema([
-                    TextInput::make('zalo_id')
-                        ->label('Zalo ID cá nhân')
-                        ->placeholder('VD: 123456789012345')
-                        ->helperText('Để lấy Zalo ID: Mở Zalo → Settings → Account → Copy mã số. Hoặc nhắn thử 1 tin vào OA Flashship → xem trong bảng ai_conversations.')
-                        ->maxLength(50),
-                ])
-                ->collapsible(),
         ]);
     }
 
@@ -110,34 +97,25 @@ class UserResource extends Resource
             Tables\Columns\TextColumn::make('roles.name')
                 ->label('Vai trò')
                 ->badge()
-                ->formatStateUsing(function ($state) {
-                    $map = [
-                        'admin' => 'Quản trị',
-                        'dispatcher' => 'Tổng đài',
-                        'accountant' => 'Kế toán',
-                        'driver' => 'Tài xế',
-                        'manager' => 'Quản lý'
-                    ];
-                    return $map[$state] ?? $state;
+                ->formatStateUsing(fn($state) => match ($state) {
+                    'admin'      => 'Quản trị',
+                    'dispatcher' => 'Tổng đài',
+                    'accountant' => 'Kế toán',
+                    'driver'     => 'Tài xế',
+                    'manager'    => 'Quản lý',
+                    default      => $state,
                 })
-                ->colors([
-                    'danger' => 'admin',
-                    'warning' => 'manager',
-                    'success' => 'accountant',
-                    'info' => 'dispatcher',
-                    'gray' => 'driver',
-                ]),
+                ->color(fn($state) => match ($state) {
+                    'admin'      => 'danger',
+                    'manager'    => 'warning',
+                    'accountant' => 'success',
+                    'dispatcher' => 'info',
+                    default      => 'gray',
+                }),
 
             Tables\Columns\IconColumn::make('status')
                 ->boolean()
                 ->label('H.Động')
-                ->alignCenter(),
-
-            Tables\Columns\IconColumn::make('zalo_id')
-                ->label('Zalo Alert')
-                ->icon(fn ($state) => $state ? 'heroicon-o-chat-bubble-left-ellipsis' : 'heroicon-o-x-mark')
-                ->color(fn ($state) => $state ? 'success' : 'gray')
-                ->tooltip(fn ($record) => $record->zalo_id ? 'Zalo: ' . $record->zalo_id : 'Chưa cài đặt Zalo')
                 ->alignCenter(),
         ])
             ->actions([

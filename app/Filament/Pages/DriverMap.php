@@ -7,11 +7,11 @@ use App\Models\User;
 
 class DriverMap extends Page
 {
-    protected static ?string $navigationIcon = 'heroicon-o-map';
-    protected static ?string $navigationLabel = 'Bản đồ';
-    protected static ?string $navigationGroup = null;
-    protected static ?int $navigationSort = 3;
-    protected static ?string $title = 'Bản đồ tài xế';
+    protected static ?string $navigationIcon  = 'heroicon-o-map';
+    protected static ?string $navigationLabel = 'Bản đồ thời gian thực';
+    protected static ?string $navigationGroup = 'QUẢN LÝ TÀI XẾ';
+    protected static ?int    $navigationSort  = 10;
+    protected static ?string $title           = 'Bản đồ tài xế';
 
     protected static string $view = 'filament.resources.user-resource.pages.driver-map';
 

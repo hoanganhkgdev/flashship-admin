@@ -46,10 +46,11 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->widgets([])
             ->navigationGroups([
+                NavigationGroup::make()->label('ĐƠN HÀNG'),
+                NavigationGroup::make()->label('QUẢN LÝ TÀI XẾ'),
                 NavigationGroup::make()->label('TÀI CHÍNH'),
                 NavigationGroup::make()->label('BÁO CÁO'),
                 NavigationGroup::make()->label('CẤU HÌNH VẬN HÀNH'),
-                NavigationGroup::make()->label('CẤU HÌNH AI & OA'),
                 NavigationGroup::make()->label('CÀI ĐẶT HỆ THỐNG'),
             ])
             ->navigationItems([
@@ -69,22 +70,6 @@ class AdminPanelProvider extends PanelProvider
                 Authenticate::class,
             ])
 
-            // 🟢 THÊM ROUTE CHUYỂN VÙNG NGAY TRONG FILAMENT
-            ->routes(function () {
-                Route::get('/switch-city/{city}', function (City $city) {
-                    session(['current_city_id' => $city->id]);
-
-                    // tránh loop redirect
-                    $previous = url()->previous();
-                    $current = url()->current();
-
-                    return redirect(
-                        $previous !== $current
-                        ? $previous
-                        : route('filament.admin.pages.dashboard')
-                    );
-                })->name('admin.switch-city');
-            })
 
             // 🟢 HIỂN THỊ CHỌN VÙNG Ở CUỐI SIDEBAR
             ->renderHook(
@@ -208,21 +193,22 @@ HTML
 
     public function boot(): void
     {
-        // 🟢 Đảm bảo route luôn được load
         Route::middleware(['web', Authenticate::class])
-            ->get('/admin/switch-city/{city}', function (City $city) {
-                session(['current_city_id' => $city->id]);
-
+            ->get('/admin/switch-city/{cityId}', function (int $cityId) {
+                if ($cityId === 0) {
+                    session()->forget('current_city_id');
+                } else {
+                    $city = City::findOrFail($cityId);
+                    session(['current_city_id' => $city->id]);
+                }
                 $previous = url()->previous();
-                $current = url()->current();
-
+                $current  = url()->current();
                 return redirect(
                     $previous !== $current
                     ? $previous
                     : route('filament.admin.pages.dashboard')
                 );
-            })
-            ->name('admin.switch-city');
+            })->name('admin.switch-city');
 
         Filament::serving(function () {
             if (auth()->check()) {

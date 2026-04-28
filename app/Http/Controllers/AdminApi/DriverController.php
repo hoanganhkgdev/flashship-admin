@@ -18,7 +18,7 @@ class DriverController extends Controller
     {
         $query = User::query()
             ->role('driver')
-            ->with(['city:id,name', 'shift:id,name'])
+            ->with(['city:id,name', 'shifts:id,name'])
             ->withCount('orders')
             ->latest();
 

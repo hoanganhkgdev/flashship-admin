@@ -3,114 +3,86 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\CityResource\Pages;
+use App\Filament\Resources\CityResource\Widgets\CityOverviewWidget;
 use App\Models\City;
+use App\Services\GeocodingService;
 use Filament\Forms;
+use Filament\Forms\Components\Grid;
+use Filament\Forms\Components\Section;
 use Filament\Forms\Form;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Filament\Forms\Components\Section;
-use Filament\Forms\Components\Grid;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 
 class CityResource extends Resource
 {
     protected static ?string $model = City::class;
 
-    protected static ?string $navigationGroup = 'CẤU HÌNH VẬN HÀNH';
-    protected static ?string $navigationIcon = 'heroicon-o-building-office';
-    protected static ?string $navigationLabel = 'Khu vực (HUB)';
-    protected static ?string $modelLabel = 'khu vực';
+    protected static ?string $navigationGroup  = 'CẤU HÌNH VẬN HÀNH';
+    protected static ?string $navigationIcon   = 'heroicon-o-building-office';
+    protected static ?string $navigationLabel  = 'Khu vực (HUB)';
+    protected static ?string $modelLabel       = 'khu vực';
     protected static ?string $pluralModelLabel = 'Danh sách khu vực';
-    protected static ?int $navigationSort = 1;
+    protected static ?int    $navigationSort   = 1;
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with('activePlan');
+    }
+
+    // =========================================================================
+    // FORM
+    // =========================================================================
 
     public static function form(Form $form): Form
     {
         return $form->schema([
-            Section::make('Thông tin chung')
-                ->schema([
-                    Grid::make(2)->schema([
-                        Forms\Components\TextInput::make('name')
-                            ->label('Tên tỉnh/thành phố')
-                            ->required()
-                            ->maxLength(255)
-                            ->live(onBlur: true)
-                            ->afterStateUpdated(function (string $operation, $state, Forms\Set $set) {
-                                if ($operation !== 'create') {
-                                    return;
-                                }
-                                if (empty($state)) {
-                                    return;
-                                }
+            Section::make('Thông tin chung')->schema([
+                Grid::make(2)->schema([
+                    Forms\Components\TextInput::make('name')
+                        ->label('Tên khu vực')
+                        ->required()
+                        ->maxLength(255)
+                        ->live(onBlur: true)
+                        ->afterStateUpdated(function (string $operation, $state, Forms\Set $set) {
+                            if ($operation !== 'create' || empty($state)) return;
+                            $code = collect(explode(' ', $state))
+                                ->filter()
+                                ->map(fn($w) => mb_substr($w, 0, 1))
+                                ->join('');
+                            $set('code', Str::upper(Str::ascii($code)));
+                        }),
 
-                                // Tự động tạo mã từ chữ cái đầu (VD: Cần Thơ -> CT)
-                                $words = explode(' ', $state);
-                                $code = '';
-                                foreach ($words as $word) {
-                                    if (!empty($word)) {
-                                        $code .= mb_substr($word, 0, 1);
-                                    }
-                                }
-                                $set('code', \Illuminate\Support\Str::upper(\Illuminate\Support\Str::ascii($code)));
-                            }),
-
-                        Forms\Components\TextInput::make('code')
-                            ->label('Mã code (HN, HCM...)')
-                            ->maxLength(50),
-                    ]),
-
-                    Forms\Components\Toggle::make('status')
-                        ->label('Kích hoạt')
-                        ->default(true),
+                    Forms\Components\TextInput::make('code')
+                        ->label('Mã vùng (HN, HCM...)')
+                        ->maxLength(50),
                 ]),
 
-            Section::make('Tâm khu vực (HUB)')
-                ->description('Nhập địa chỉ trung tâm (Ví dụ: Chợ Rạch Giá) để hệ thống tự động xác định tọa độ.')
+                Forms\Components\Toggle::make('status')
+                    ->label('Đang hoạt động')
+                    ->default(true)
+                    ->inline(false),
+            ]),
+
+            Section::make('Toạ độ trung tâm (HUB)')
+                ->description('Chọn địa chỉ để hệ thống tự điền toạ độ, hoặc nhập thủ công.')
                 ->schema([
                     Forms\Components\Select::make('search_address')
-                        ->label('Tìm kiếm địa chỉ trung tâm')
-                        ->placeholder('🔍 Bắt đầu nhập để tìm kiếm địa điểm...')
+                        ->label('Tìm địa chỉ trung tâm')
+                        ->placeholder('Bắt đầu nhập tên địa điểm...')
                         ->searchable()
-                        ->getSearchResultsUsing(function (string $search) {
-                            if (empty($search))
-                                return [];
-
-                            $apiKey = config('services.google.maps_key');
-                            $response = \Illuminate\Support\Facades\Http::get("https://maps.googleapis.com/maps/api/place/autocomplete/json", [
-                                'input' => $search,
-                                'key' => $apiKey,
-                                'language' => 'vi',
-                                'components' => 'country:vn'
-                            ]);
-
-                            return collect($response->json()['predictions'] ?? [])
-                                ->mapWithKeys(fn($p) => [$p['description'] => $p['description']])
-                                ->toArray();
-                        })
-                        ->reactive()
+                        ->getSearchResultsUsing(fn(string $search) => GeocodingService::autocomplete($search))
+                        ->live()
                         ->afterStateUpdated(function ($state, Forms\Set $set) {
-                            if (empty($state))
-                                return;
-
-                            try {
-                                $apiKey = config('services.google.maps_key');
-                                $response = \Illuminate\Support\Facades\Http::get("https://maps.googleapis.com/maps/api/geocode/json", [
-                                    'address' => $state,
-                                    'key' => $apiKey,
-                                ]);
-
-                                $data = $response->json();
-
-                                if ($data['status'] === 'OK') {
-                                    $location = $data['results'][0]['geometry']['location'];
-                                    $set('latitude', $location['lat']);
-                                    $set('longitude', $location['lng']);
-
-                                    \Filament\Notifications\Notification::make()
-                                        ->title('Đã định vị tọa độ từ địa chỉ!')
-                                        ->success()
-                                        ->send();
-                                }
-                            } catch (\Exception $e) {
+                            if (empty($state)) return;
+                            $location = GeocodingService::geocodeAddress($state);
+                            if ($location) {
+                                $set('latitude', $location['lat']);
+                                $set('longitude', $location['lng']);
+                                Notification::make()->title('Đã định vị toạ độ!')->success()->send();
                             }
                         })
                         ->dehydrated(false),
@@ -120,48 +92,72 @@ class CityResource extends Resource
                             ->label('Vĩ độ (Latitude)')
                             ->required()
                             ->numeric()
-                            ->placeholder('Ví dụ: 10.045...'),
+                            ->placeholder('10.045...'),
 
                         Forms\Components\TextInput::make('longitude')
                             ->label('Kinh độ (Longitude)')
                             ->required()
                             ->numeric()
-                            ->placeholder('Ví dụ: 105.746...'),
+                            ->placeholder('105.746...'),
                     ]),
                 ]),
         ]);
     }
 
+    // =========================================================================
+    // TABLE
+    // =========================================================================
+
     public static function table(Table $table): Table
     {
         return $table
+            ->defaultSort('id', 'asc')
             ->columns([
-                Tables\Columns\TextColumn::make('stt')
-                    ->label('STT')
-                    ->rowIndex()
+                Tables\Columns\TextColumn::make('id')
+                    ->label('#')
+                    ->sortable()
+                    ->width('50px')
                     ->alignCenter(),
 
                 Tables\Columns\TextColumn::make('name')
-                    ->label('Khu vực (HUB)')
+                    ->label('Khu vực')
                     ->searchable()
-                    ->description(fn($record) => "Tâm HUB: {$record->latitude}, {$record->longitude}")
-                    ->icon('heroicon-m-map-pin')
-                    ->iconColor('success')
                     ->weight('bold')
-                    ->color('primary'),
+                    ->description(fn($record) => $record->latitude
+                        ? "📍 {$record->latitude}, {$record->longitude}"
+                        : 'Chưa có toạ độ'
+                    ),
 
                 Tables\Columns\TextColumn::make('code')
-                    ->label('Mã vùng')
+                    ->label('Mã')
                     ->badge()
-                    ->colors(['indigo'])
-                    ->searchable()
+                    ->color('gray')
+                    ->alignCenter(),
+
+                Tables\Columns\TextColumn::make('activePlan.type')
+                    ->label('Gói hiện tại')
+                    ->badge()
+                    ->formatStateUsing(fn($state) => match ($state) {
+                        \App\Models\Plan::TYPE_WEEKLY     => 'Cước tuần',
+                        \App\Models\Plan::TYPE_COMMISSION => 'Chiết khấu %',
+                        \App\Models\Plan::TYPE_PARTNER    => 'Đối tác',
+                        \App\Models\Plan::TYPE_FREE       => 'Miễn phí',
+                        default                           => $state ?? 'Chưa có gói',
+                    })
+                    ->color(fn($state) => match ($state) {
+                        \App\Models\Plan::TYPE_WEEKLY     => 'info',
+                        \App\Models\Plan::TYPE_COMMISSION => 'warning',
+                        \App\Models\Plan::TYPE_PARTNER    => 'success',
+                        \App\Models\Plan::TYPE_FREE       => 'gray',
+                        default                           => 'gray',
+                    })
                     ->alignCenter(),
 
                 Tables\Columns\TextColumn::make('drivers_count')
                     ->label('Tài xế')
                     ->counts('drivers')
                     ->badge()
-                    ->color('info')
+                    ->color('primary')
                     ->alignCenter()
                     ->icon('heroicon-m-user-group'),
 
@@ -173,21 +169,19 @@ class CityResource extends Resource
                     ->alignCenter()
                     ->icon('heroicon-m-shopping-bag'),
 
-                Tables\Columns\TextColumn::make('status')
+                Tables\Columns\ToggleColumn::make('status')
                     ->label('Hoạt động')
-                    ->badge()
-                    ->formatStateUsing(fn($state) => $state ? 'Mở cửa' : 'Đóng cửa')
-                    ->colors([
-                        'success' => 1,
-                        'danger' => 0,
-                    ])
-                    ->alignCenter(),
-
+                    ->alignCenter()
+                    ->beforeStateUpdated(function ($record) {
+                        if (!static::adminOnly()) {
+                            Notification::make()->title('Không có quyền thực hiện.')->danger()->send();
+                            return false;
+                        }
+                    }),
             ])
-            ->defaultSort('id', 'asc')
             ->filters([
                 Tables\Filters\TernaryFilter::make('status')
-                    ->label('Trạng thái hoạt động')
+                    ->label('Trạng thái')
                     ->placeholder('Tất cả'),
             ])
             ->actions([
@@ -197,45 +191,51 @@ class CityResource extends Resource
                         ->icon('heroicon-o-map')
                         ->color('success')
                         ->url(fn($record) => "https://www.google.com/maps?q={$record->latitude},{$record->longitude}")
-                        ->openUrlInNewTab(),
+                        ->openUrlInNewTab()
+                        ->visible(fn($record) => $record->latitude && $record->longitude),
                     Tables\Actions\EditAction::make(),
                     Tables\Actions\DeleteAction::make(),
                 ])
                     ->icon('heroicon-m-ellipsis-vertical')
                     ->color('gray')
                     ->button()
-                    ->label('Tùy chọn'),
+                    ->label('Tuỳ chọn'),
             ])
             ->bulkActions([
-                Tables\Actions\DeleteBulkAction::make(),
+                Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\DeleteBulkAction::make(),
+                ]),
             ]);
     }
+
+    // =========================================================================
+    // PAGES & WIDGETS
+    // =========================================================================
 
     public static function getPages(): array
     {
         return [
-            'index' => Pages\ListCities::route('/'),
+            'index'  => Pages\ListCities::route('/'),
             'create' => Pages\CreateCity::route('/create'),
-            'edit' => Pages\EditCity::route('/{record}/edit'),
+            'edit'   => Pages\EditCity::route('/{record}/edit'),
         ];
     }
 
-    public static function canViewAny(): bool
+    public static function getWidgets(): array
     {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin']);
+        return [CityOverviewWidget::class];
     }
 
-    public static function canCreate(): bool
-    {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin']);
-    }
+    // =========================================================================
+    // PERMISSIONS
+    // =========================================================================
 
-    public static function canEdit($record): bool
-    {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin']);
-    }
+    public static function canViewAny(): bool       { return static::adminOnly(); }
+    public static function canCreate(): bool        { return static::adminOnly(); }
+    public static function canEdit($record): bool   { return static::adminOnly(); }
+    public static function canDelete($record): bool { return static::adminOnly(); }
 
-    public static function canDelete($record): bool
+    private static function adminOnly(): bool
     {
         return auth()->check() && auth()->user()->hasRole('admin');
     }

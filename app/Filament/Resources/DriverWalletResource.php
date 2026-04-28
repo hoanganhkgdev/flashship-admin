@@ -9,7 +9,6 @@ use App\Services\DriverWalletService;
 use Filament\Forms;
 use Filament\Resources\Resource;
 use Filament\Tables;
-use Filament\Forms\Form;
 use Filament\Tables\Table;
 use Filament\Infolists\Infolist;
 use Filament\Infolists\Components;
@@ -30,37 +29,90 @@ class DriverWalletResource extends Resource
         return 'TÀI CHÍNH';
     }
 
-    // Form chỉ dùng cho EditAction (ít khi dùng trực tiếp)
-    public static function form(Form $form): Form
-    {
-        return $form->schema([
-            Forms\Components\TextInput::make('driver_id')->disabled()->label('ID Tài xế'),
-            Forms\Components\TextInput::make('balance')->numeric()->label('Số dư'),
-        ]);
-    }
-
     public static function infolist(Infolist $infolist): Infolist
     {
         return $infolist->schema([
-            Components\Section::make('Tổng quan ví')
+            Components\Section::make('Thông tin tài xế')
+                ->columns(4)
                 ->schema([
-                    Components\Grid::make(3)->schema([
-                        Components\TextEntry::make('driver.name')
-                            ->label('Chủ ví')
-                            ->weight(FontWeight::Bold)
-                            ->color('primary'),
-                        Components\TextEntry::make('driver.phone')
-                            ->label('Số điện thoại'),
-                        Components\TextEntry::make('driver.city.name')
-                            ->label('Khu vực')
-                            ->badge(),
-                    ]),
+                    Components\ImageEntry::make('driver.profile_photo_path')
+                        ->label('')
+                        ->circular()
+                        ->defaultImageUrl(fn($record) => 'https://ui-avatars.com/api/?name=' . urlencode($record->driver?->name ?? '?') . '&color=ffffff&background=6d28d9')
+                        ->size(72),
+
+                    Components\TextEntry::make('driver.name')
+                        ->label('Tài xế')
+                        ->weight(FontWeight::Bold)
+                        ->color('primary'),
+
+                    Components\TextEntry::make('driver.phone')
+                        ->label('Số điện thoại'),
+
+                    Components\TextEntry::make('driver.city.name')
+                        ->label('Khu vực')
+                        ->badge()
+                        ->color('gray'),
+
+                    Components\TextEntry::make('driver.plan.name')
+                        ->label('Gói cước')
+                        ->badge()
+                        ->color(fn($record) => match ($record->driver?->plan?->type) {
+                            'weekly'     => 'primary',
+                            'commission' => 'warning',
+                            'partner'    => 'info',
+                            'free'       => 'gray',
+                            default      => 'gray',
+                        })
+                        ->default('Chưa có gói'),
+
+                    Components\TextEntry::make('driver.status')
+                        ->label('Trạng thái tài xế')
+                        ->badge()
+                        ->formatStateUsing(fn($state) => match ((int) $state) {
+                            0 => 'Chờ duyệt',
+                            1 => 'Hoạt động',
+                            2 => 'Bị khóa',
+                            default => $state,
+                        })
+                        ->color(fn($state) => match ((int) $state) {
+                            0 => 'warning',
+                            1 => 'success',
+                            2 => 'danger',
+                            default => 'gray',
+                        }),
+                ]),
+
+            Components\Section::make('Số dư & giao dịch')
+                ->columns(4)
+                ->schema([
                     Components\TextEntry::make('balance')
                         ->label('Số dư hiện tại')
                         ->money('VND')
                         ->weight(FontWeight::Bold)
                         ->size(Components\TextEntry\TextEntrySize::Large)
                         ->color(fn($state) => $state < 0 ? 'danger' : 'success'),
+
+                    Components\TextEntry::make('transactions_count')
+                        ->label('Tổng giao dịch')
+                        ->getStateUsing(fn($record) => $record->transactions()->count() . ' giao dịch')
+                        ->icon('heroicon-o-list-bullet'),
+
+                    Components\TextEntry::make('total_credited')
+                        ->label('Tổng đã cộng')
+                        ->getStateUsing(fn($record) => number_format(
+                            $record->transactions()->where('type', 'credit')->sum('amount'), 0, ',', '.'
+                        ) . '₫')
+                        ->color('success')
+                        ->icon('heroicon-o-arrow-up-circle'),
+
+                    Components\TextEntry::make('total_debited')
+                        ->label('Tổng đã trừ')
+                        ->getStateUsing(fn($record) => number_format(
+                            $record->transactions()->where('type', 'debit')->sum('amount'), 0, ',', '.'
+                        ) . '₫')
+                        ->color('danger')
+                        ->icon('heroicon-o-arrow-down-circle'),
                 ]),
         ]);
     }
@@ -69,10 +121,11 @@ class DriverWalletResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('stt')
-                    ->label('STT')
-                    ->rowIndex()
-                    ->alignCenter(),
+                Tables\Columns\ImageColumn::make('driver.profile_photo_path')
+                    ->label('')
+                    ->circular()
+                    ->defaultImageUrl(fn($record) => 'https://ui-avatars.com/api/?name=' . urlencode($record->driver?->name ?? '?') . '&color=ffffff&background=6d28d9')
+                    ->size(44),
 
                 Tables\Columns\TextColumn::make('driver.name')
                     ->label('Tài xế')
@@ -84,6 +137,19 @@ class DriverWalletResource extends Resource
                     ->label('Khu vực')
                     ->badge()
                     ->color('gray')
+                    ->alignCenter(),
+
+                Tables\Columns\TextColumn::make('driver.plan.name')
+                    ->label('Gói cước')
+                    ->badge()
+                    ->color(fn($record) => match ($record->driver?->plan?->type) {
+                        'weekly'     => 'primary',
+                        'commission' => 'warning',
+                        'partner'    => 'info',
+                        'free'       => 'gray',
+                        default      => 'gray',
+                    })
+                    ->default('—')
                     ->alignCenter(),
 
                 Tables\Columns\TextColumn::make('balance')
@@ -124,12 +190,9 @@ class DriverWalletResource extends Resource
                     ->form([
                         Forms\Components\TextInput::make('amount')
                             ->label('Số tiền cộng (₫)')
-                            ->numeric()
-                            ->minValue(1000)
-                            ->required(),
+                            ->numeric()->minValue(1000)->required(),
                         Forms\Components\Textarea::make('description')
-                            ->label('Lý do')
-                            ->required(),
+                            ->label('Lý do')->required()->rows(2),
                     ])
                     ->action(function ($record, array $data) {
                         DriverWalletService::adjust(
@@ -139,7 +202,9 @@ class DriverWalletResource extends Resource
                             $data['description'],
                             'manual_credit_' . $record->driver_id . '_' . now()->timestamp
                         );
-                        Notification::make()->title('Đã cộng ' . number_format($data['amount'], 0, ',', '.') . '₫ vào ví')->success()->send();
+                        Notification::make()
+                            ->title('Đã cộng ' . number_format($data['amount'], 0, ',', '.') . '₫ vào ví')
+                            ->success()->send();
                     }),
 
                 Tables\Actions\Action::make('adjust_debit')
@@ -151,12 +216,9 @@ class DriverWalletResource extends Resource
                     ->form([
                         Forms\Components\TextInput::make('amount')
                             ->label('Số tiền trừ (₫)')
-                            ->numeric()
-                            ->minValue(1000)
-                            ->required(),
+                            ->numeric()->minValue(1000)->required(),
                         Forms\Components\Textarea::make('description')
-                            ->label('Lý do')
-                            ->required(),
+                            ->label('Lý do')->required()->rows(2),
                     ])
                     ->action(function ($record, array $data) {
                         try {
@@ -165,9 +227,12 @@ class DriverWalletResource extends Resource
                                 (float) $data['amount'],
                                 'debit',
                                 $data['description'],
-                                'manual_debit_' . $record->driver_id . '_' . now()->timestamp
+                                'manual_debit_' . $record->driver_id . '_' . now()->timestamp,
+                                true
                             );
-                            Notification::make()->title('Đã trừ ' . number_format($data['amount'], 0, ',', '.') . '₫ khỏi ví')->success()->send();
+                            Notification::make()
+                                ->title('Đã trừ ' . number_format($data['amount'], 0, ',', '.') . '₫ khỏi ví')
+                                ->success()->send();
                         } catch (\Exception $e) {
                             Notification::make()->title('Lỗi: ' . $e->getMessage())->danger()->send();
                         }
@@ -208,17 +273,17 @@ class DriverWalletResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin']);
+        return auth()->check() && auth()->user()->hasAnyRole(['admin', 'manager', 'dispatcher']);
     }
 
     public static function canCreate(): bool
     {
-        return false; // Ví tự tạo khi tài xế đăng ký, không cần tạo thủ công
+        return false;
     }
 
     public static function canEdit($record): bool
     {
-        return false; // Dùng action adjust thay vì edit trực tiếp
+        return false;
     }
 
     public static function canDelete($record): bool
@@ -228,17 +293,16 @@ class DriverWalletResource extends Resource
 
     public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
     {
-        $query = parent::getEloquentQuery()
-            ->with(['driver.city']); // Eager load để tránh N+1
+        $query = parent::getEloquentQuery()->with(['driver.city', 'driver.plan']);
 
         $user = auth()->user();
 
-        if ($user->hasRole('admin') && session()->has('current_city_id')) {
-            $cityId = session('current_city_id');
-            $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
+        if ($user->hasRole('admin')) {
+            if ($cityId = session('current_city_id')) {
+                $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
+            }
         } elseif ($user->hasAnyRole(['manager', 'dispatcher'])) {
-            $cityId = $user->city_id;
-            $query->whereHas('driver', fn($q) => $q->where('city_id', $cityId));
+            $query->whereHas('driver', fn($q) => $q->where('city_id', $user->city_id));
         }
 
         return $query;

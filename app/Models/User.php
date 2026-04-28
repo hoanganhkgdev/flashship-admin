@@ -38,7 +38,6 @@ class User extends Authenticatable implements FilamentUser
         'last_login_at',
         'player_id',   // Deprecated - giữ để tương thích ngược
         'fcm_token',   // ✅ Firebase Cloud Messaging token
-        'zalo_id',
         'last_notification_seen',
         'is_online',
         'shift_id',
@@ -103,9 +102,13 @@ class User extends Authenticatable implements FilamentUser
     {
         // Cache 2 phút/user — tránh query DB mọi request
         return Cache::remember("user_shift_{$this->id}", 120, function () {
-            // 🔹 Nếu là tài xế đối tác (chiết khấu riêng) HOẶC gói % (commission) HOẶC không gán gói
-            // -> Cho phép Online bất kỳ lúc nào
-            if ($this->custom_commission_rate !== null || !$this->plan || $this->plan->type === 'commission') {
+            // Gói commission, partner, hoặc chưa gán gói → chạy tự do, không cần ca
+            if (!$this->plan
+                || $this->plan->type === Plan::TYPE_COMMISSION
+                || $this->plan->type === Plan::TYPE_PARTNER
+                || $this->plan->type === Plan::TYPE_FREE
+                || $this->custom_commission_rate !== null
+            ) {
                 return true;
             }
 
@@ -133,10 +136,10 @@ class User extends Authenticatable implements FilamentUser
         Cache::forget("user_shift_{$this->id}");
     }
 
-    public function getHasCarLicenseAttribute()
+    public function getHasCarLicenseAttribute(): bool
     {
         return $this->driverLicenses()
-            ->where('status', 'approved')
+            ->where('status', DriverLicense::STATUS_APPROVED)
             ->exists();
     }
 
@@ -158,11 +161,6 @@ class User extends Authenticatable implements FilamentUser
     public function debts()
     {
         return $this->hasMany(DriverDebt::class, 'driver_id');
-    }
-
-    public function shift()
-    {
-        return $this->belongsTo(Shift::class);
     }
 
     public function plan()

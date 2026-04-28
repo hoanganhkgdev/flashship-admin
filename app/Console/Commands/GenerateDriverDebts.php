@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 
 class GenerateDriverDebts extends Command
 {
-    protected $signature = 'driver:generate-debts';
+    protected $signature = 'driver:generate-debts {--city= : Lọc theo city_id (bỏ trống = toàn hệ thống)}';
     protected $description = 'Tạo công nợ hàng tuần cho tất cả tài xế';
 
     public function handle()
@@ -18,20 +18,25 @@ class GenerateDriverDebts extends Command
         $weekStart = Carbon::now('Asia/Ho_Chi_Minh')->startOfWeek(); // Thứ 2
         $weekEnd   = Carbon::now('Asia/Ho_Chi_Minh')->endOfWeek();   // Chủ Nhật
 
+        $cityId    = $this->option('city') ? (int) $this->option('city') : null;
+        $cityLabel = $cityId ? " (city_id={$cityId})" : ' (toàn hệ thống)';
+
         // 🔹 Đếm số tài khoản không active để log
         $inactiveCount = User::drivers()
             ->whereHas('plan', fn($q) => $q->where('type', 'weekly'))
+            ->when($cityId, fn($q) => $q->where('city_id', $cityId))
             ->where('status', '!=', 1)
             ->count();
 
         $drivers = User::drivers()
-            ->whereHas('plan', function ($query) {
-                $query->where('type', 'weekly');
-            })
-            ->whereNull('custom_commission_rate') // 🛑 Bỏ qua tài xế đã set % chiết khấu riêng
+            ->whereHas('plan', fn($q) => $q->where('type', 'weekly'))
+            ->whereNull('custom_commission_rate')
+            ->when($cityId, fn($q) => $q->where('city_id', $cityId))
             ->with(['shifts', 'plan', 'city'])
             ->where('status', 1)
             ->get();
+
+        $this->info("🔄 Tạo công nợ tuần {$weekStart->format('d/m')} → {$weekEnd->format('d/m')}{$cityLabel}");
 
         if ($inactiveCount > 0) {
             Log::info("⚠️ Đã bỏ qua {$inactiveCount} tài khoản không active khi tạo công nợ tuần");
@@ -44,6 +49,12 @@ class GenerateDriverDebts extends Command
         foreach ($drivers as $driver) {
             $plan = $driver->plan;
             $city = $driver->city;
+
+            // Bỏ qua tài xế gói free
+            if ($plan?->type === 'free') {
+                $this->line("  ⏭ Tài xế #{$driver->id} gói free — bỏ qua.");
+                continue;
+            }
 
             $hasFull = $driver->shifts->contains('code', 'full');
 
@@ -64,7 +75,10 @@ class GenerateDriverDebts extends Command
                 continue;
             }
 
-            // Tạo công nợ và lưu lại vào biến $debt
+            $weekNote = ($hasFull ? 'Cả ngày' : 'Bán thời gian') .
+                ' — Tuần ' . $weekStart->format('d/m') . ' → ' . $weekEnd->format('d/m/Y') .
+                ': ' . number_format($amountDue) . '₫';
+
             $debt = DriverDebt::create([
                 'driver_id' => $driver->id,
                 'debt_type' => 'weekly',
@@ -73,6 +87,7 @@ class GenerateDriverDebts extends Command
                 'amount_due' => $amountDue,
                 'amount_paid' => 0,
                 'status' => 'pending',
+                'note' => $weekNote,
             ]);
 
             // 🔔 Gửi FCM thông báo công nợ mới ngay sau khi tạo
@@ -82,32 +97,13 @@ class GenerateDriverDebts extends Command
         $this->info("✅ Đã tạo công nợ cho " . $drivers->count() . " tài xế.");
     }
 
-    protected function sendDebtNotification($driver, $debt)
+    protected function sendDebtNotification($driver, $debt): void
     {
-        $playerId = $driver->fcm_token;
-        if (!$playerId) {
-            Log::warning("⚠️ Tài xế {$driver->id} chưa có FCM Token, bỏ qua.");
+        if (!$driver->fcm_token) {
+            Log::warning("⚠️ Tài xế #{$driver->id} chưa có FCM Token, bỏ qua.");
             return;
         }
 
-        // 🧾 Chuẩn bị dữ liệu thông báo
-        $title = '💰 Công nợ tuần mới';
-        $body = 'Công nợ từ ' . $debt->week_start->format('d/m') . ' đến ' . $debt->week_end->format('d/m') .
-            ' đã được tạo. Vui lòng thanh toán trước hạn.';
-
-        $data = [
-            'type' => 'driver_debt_created',
-            'debt_id' => (string) $debt->id,
-            'amount_due' => (string) $debt->amount_due,
-            'week_start' => $debt->week_start->format('Y-m-d'),
-            'week_end' => $debt->week_end->format('Y-m-d'),
-        ];
-
-        // ⚡️ Gửi qua helper (giống Order)
-        try {
-            \App\Helpers\FcmHelper::sendToMultiple([$playerId], $title, $body, $data);
-        } catch (\Throwable $e) {
-            Log::error("❌ Lỗi gửi FCM cho tài xế {$driver->id}: " . $e->getMessage());
-        }
+        \App\Services\NotificationService::notifyWeeklyDebtCreated($driver, $debt);
     }
 }

@@ -88,10 +88,7 @@ class ListWeeklyDebts extends ListRecords
         if (request()->routeIs('filament.admin.resources.driver-debts.index') && session()->has('current_city_id') && !session('debt_redirected')) {
             $cityId = session('current_city_id');
 
-            $hasWeeklyPlan = \App\Models\Plan::where('city_id', $cityId)
-                ->where('type', 'weekly')
-                ->where('is_active', true)
-                ->exists();
+            $hasWeeklyPlan = \App\Models\Plan::active()->forCity($cityId)->weekly()->exists();
 
             if (!$hasWeeklyPlan) {
                 session(['debt_redirected' => true]);

@@ -16,7 +16,6 @@ namespace App\Helpers;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
 
 class FcmHelper
 {
@@ -165,61 +164,11 @@ class FcmHelper
         return $payload;
     }
 
-    /**
-     * Lấy OAuth 2.0 Access Token từ Service Account
-     * Cache 55 phút (token hết hạn sau 60 phút)
-     */
     private static function getAccessToken(): ?string
     {
-        return Cache::remember('fcm_access_token', 55 * 60, function () {
-            $credentialsPath = storage_path('app/firebase-service-account.json');
-
-            if (!file_exists($credentialsPath)) {
-                Log::error("FCM: Không tìm thấy file service account tại: {$credentialsPath}");
-                return null;
-            }
-
-            $credentials = json_decode(file_get_contents($credentialsPath), true);
-            if (empty($credentials)) {
-                Log::error("FCM: Không thể đọc service account JSON");
-                return null;
-            }
-
-            try {
-                // Tạo JWT
-                $header  = self::base64UrlEncode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
-                $now     = time();
-                $payload = self::base64UrlEncode(json_encode([
-                    'iss'   => $credentials['client_email'],
-                    'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
-                    'aud'   => 'https://oauth2.googleapis.com/token',
-                    'iat'   => $now,
-                    'exp'   => $now + 3600,
-                ]));
-
-                $signingInput = "{$header}.{$payload}";
-                $privateKey   = openssl_pkey_get_private($credentials['private_key']);
-
-                openssl_sign($signingInput, $signature, $privateKey, OPENSSL_ALGO_SHA256);
-                $jwt = "{$signingInput}." . self::base64UrlEncode($signature);
-
-                // Đổi JWT lấy Access Token
-                $response = Http::asForm()->post('https://oauth2.googleapis.com/token', [
-                    'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-                    'assertion'  => $jwt,
-                ]);
-
-                if ($response->successful()) {
-                    return $response->json('access_token');
-                }
-
-                Log::error("FCM: Lấy access token thất bại: " . $response->body());
-                return null;
-            } catch (\Exception $e) {
-                Log::error("FCM: Lỗi tạo JWT: " . $e->getMessage());
-                return null;
-            }
-        });
+        return \App\Services\FirebaseServiceAccount::getAccessToken(
+            \App\Services\FirebaseServiceAccount::SCOPE_MESSAGING
+        );
     }
 
     /**
@@ -235,8 +184,4 @@ class FcmHelper
         }
     }
 
-    private static function base64UrlEncode(string $data): string
-    {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
-    }
 }

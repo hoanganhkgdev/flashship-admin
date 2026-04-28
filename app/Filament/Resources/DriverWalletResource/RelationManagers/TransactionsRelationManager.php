@@ -2,27 +2,13 @@
 
 namespace App\Filament\Resources\DriverWalletResource\RelationManagers;
 
-use Filament\Forms;
-use Filament\Forms\Form;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class TransactionsRelationManager extends RelationManager
 {
     protected static string $relationship = 'transactions';
-
-    public function form(Form $form): Form
-    {
-        return $form
-            ->schema([
-                Forms\Components\TextInput::make('description')
-                    ->required()
-                    ->maxLength(255),
-            ]);
-    }
 
     public function table(Table $table): Table
     {
@@ -41,13 +27,14 @@ class TransactionsRelationManager extends RelationManager
                     ->badge()
                     ->formatStateUsing(fn($state) => match ($state) {
                         'credit' => 'Cộng tiền',
-                        'debit' => 'Trừ tiền',
-                        default => $state,
+                        'debit'  => 'Trừ tiền',
+                        default  => $state,
                     })
-                    ->colors([
-                        'success' => 'credit',
-                        'danger' => 'debit',
-                    ]),
+                    ->color(fn($state) => match ($state) {
+                        'credit' => 'success',
+                        'debit'  => 'danger',
+                        default  => 'gray',
+                    }),
 
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Số tiền')
@@ -70,8 +57,20 @@ class TransactionsRelationManager extends RelationManager
                     ->label('Loại giao dịch')
                     ->options([
                         'credit' => 'Cộng tiền',
-                        'debit' => 'Trừ tiền',
+                        'debit'  => 'Trừ tiền',
                     ]),
+
+                Tables\Filters\Filter::make('date_range')
+                    ->label('Khoảng thời gian')
+                    ->form([
+                        \Filament\Forms\Components\DatePicker::make('from')->label('Từ ngày'),
+                        \Filament\Forms\Components\DatePicker::make('until')->label('Đến ngày'),
+                    ])
+                    ->query(function ($query, array $data) {
+                        return $query
+                            ->when($data['from'], fn($q, $date) => $q->whereDate('created_at', '>=', $date))
+                            ->when($data['until'], fn($q, $date) => $q->whereDate('created_at', '<=', $date));
+                    }),
             ])
             ->headerActions([])
             ->actions([])
