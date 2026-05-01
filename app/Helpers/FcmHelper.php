@@ -122,24 +122,14 @@ class FcmHelper
         $stringData['title'] = $title;
         $stringData['body']  = $body;
 
-        // 'notification' block top-level: FCM dùng để hiện banner trên cả Android và iOS.
-        // - Android background/killed: FCM tự hiện, không cần background handler
-        // - iOS background/killed: APNS alert hiện ngay lập tức
-        // - Foreground: Flutter chặn qua setForegroundNotificationPresentationOptions + onMessage ignore
+        // Android: data-only (không có notification field) → Flutter tự show qua onMessage/onBackgroundMessage
+        // iOS: dùng apns.payload.aps.alert → APNS tự show khi background/killed
         $payload = [
             'message' => [
-                'token'        => $token,
-                'notification' => [
-                    'title' => $title,
-                    'body'  => $body,
-                ],
+                'token'   => $token,
                 'data'    => $stringData,
                 'android' => [
-                    'priority'     => 'HIGH',
-                    'notification' => [
-                        'sound'      => 'default',
-                        'channel_id' => 'order_channel',
-                    ],
+                    'priority' => 'HIGH',
                 ],
                 'apns' => [
                     'headers' => [
@@ -148,6 +138,10 @@ class FcmHelper
                     ],
                     'payload' => [
                         'aps' => [
+                            'alert' => [
+                                'title' => $title,
+                                'body'  => $body,
+                            ],
                             'sound'             => 'default',
                             'content-available' => 1,
                         ],
