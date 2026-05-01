@@ -182,13 +182,25 @@ class DebtService
 
     private function verifyWebhookSignature(array $data, ?string $signature): ?string
     {
-        $channels = ['payment_rachgia', 'payment_others', 'payment'];
+        // If we know the payment, verify against its exact channel — prevents cross-channel forgery
+        $orderCode = $data['orderCode'] ?? null;
+        if ($orderCode) {
+            $orderCodeInt = (int) $orderCode;
+            $payment = Payment::where('order_code', $orderCodeInt)
+                ->orWhere('order_code', (string) $orderCodeInt)
+                ->first();
 
-        foreach ($channels as $channel) {
-            if (empty(config("services.payos_{$channel}.client_id")) && $channel !== 'payment') {
+            if ($payment?->channel) {
+                $payOS = new PayOSService($payment->channel);
+                return $payOS->verifySignature($data, $signature) ? $payment->channel : null;
+            }
+        }
+
+        // Unknown orderCode: try all configured channels (no generic fallback)
+        foreach (['payment_rachgia', 'payment_others'] as $channel) {
+            if (empty(config("services.payos_{$channel}.checksum_key"))) {
                 continue;
             }
-
             $payOS = new PayOSService($channel);
             if ($payOS->verifySignature($data, $signature)) {
                 return $channel;

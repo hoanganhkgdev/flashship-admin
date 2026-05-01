@@ -82,6 +82,9 @@ class AuthController extends Controller
         if ($user->status == 2) {
             return response()->json(['success' => false, 'message' => 'Tài khoản bị khóa'], 403);
         }
+        if ($user->delete_requested_at) {
+            return response()->json(['success' => false, 'message' => 'Tài khoản đang chờ xóa. Vui lòng liên hệ admin nếu muốn hủy yêu cầu.'], 403);
+        }
 
         $currentDeviceId = $data['device_id'] ?? null;
 
@@ -114,12 +117,26 @@ class AuthController extends Controller
         }
 
 
+        // Force logout thiết bị cũ nếu đây là thiết bị mới
+        $newFcmToken = $data['fcm_token'] ?? null;
+        $oldFcmToken = $user->fcm_token;
+        $isNewDevice = $oldFcmToken && $newFcmToken && $oldFcmToken !== $newFcmToken;
+
+        if ($isNewDevice) {
+            \App\Helpers\FcmHelper::sendSingle(
+                $oldFcmToken,
+                'Đăng nhập từ thiết bị khác',
+                'Tài khoản của bạn vừa đăng nhập trên một thiết bị khác.',
+                ['type' => 'force_logout'],
+            );
+        }
+
         // Gán FCM token ngay lúc login, xóa khỏi user khác để tránh nhận nhầm thông báo
-        if (!empty($data['fcm_token'])) {
-            User::where('fcm_token', $data['fcm_token'])
+        if (!empty($newFcmToken)) {
+            User::where('fcm_token', $newFcmToken)
                 ->where('id', '!=', $user->id)
                 ->update(['fcm_token' => null]);
-            $user->fcm_token = $data['fcm_token'];
+            $user->fcm_token = $newFcmToken;
             $user->save();
         }
 

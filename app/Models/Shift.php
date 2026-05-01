@@ -67,6 +67,24 @@ class Shift extends Model
         return $now->between($start, $end);
     }
 
+    /**
+     * Seconds remaining until this shift ends.
+     * Caller should only invoke this when isNowInShift() is true.
+     */
+    public function secondsUntilEnd(): int
+    {
+        $now   = Carbon::now();
+        $start = Carbon::parse($this->start_time);
+        $end   = Carbon::parse($this->end_time);
+
+        // Overnight: if we're in the post-midnight segment, end is today; else end is tomorrow
+        if ($end->lessThan($start) && $now->greaterThanOrEqualTo($start)) {
+            $end = $end->addDay();
+        }
+
+        return max(0, (int) $now->diffInSeconds($end, false));
+    }
+
     // =========================================================================
     // ACCESSORS
     // =========================================================================

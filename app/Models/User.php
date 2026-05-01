@@ -45,6 +45,7 @@ class User extends Authenticatable implements FilamentUser
         'plan_id',
         'name_updated_at',
         'custom_commission_rate',
+        'delete_requested_at',
     ];
 
     protected $hidden = [
@@ -57,7 +58,8 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'name_updated_at' => 'datetime', // 🔹 Cast name_updated_at thành datetime
+            'name_updated_at' => 'datetime',
+            'delete_requested_at' => 'datetime',
             'custom_commission_rate' => 'float',
         ];
     }
@@ -100,32 +102,45 @@ class User extends Authenticatable implements FilamentUser
 
     public function isInShift(): bool
     {
-        // Cache 2 phút/user — tránh query DB mọi request
-        return Cache::remember("user_shift_{$this->id}", 120, function () {
-            // Gói commission, partner, hoặc chưa gán gói → chạy tự do, không cần ca
-            if (!$this->plan
-                || $this->plan->type === Plan::TYPE_COMMISSION
-                || $this->plan->type === Plan::TYPE_PARTNER
-                || $this->plan->type === Plan::TYPE_FREE
-                || $this->custom_commission_rate !== null
-            ) {
-                return true;
-            }
+        $cacheKey = "user_shift_{$this->id}";
 
-            // 🚫 Nếu là gói tuần (weekly) nhưng chưa gán ca → Không được phép Online
-            if ($this->shifts->isEmpty()) {
-                return false;
-            }
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached;
+        }
 
-            // 🕒 Kiểm tra: có ca nào đang trong giờ làm việc không?
-            foreach ($this->shifts as $shift) {
-                if ($shift->isNowInShift()) {
-                    return true;
-                }
-            }
+        [$result, $ttl] = $this->_computeIsInShift();
+        Cache::put($cacheKey, $result, $ttl);
+        return $result;
+    }
 
-            return false;
-        });
+    /** @return array{bool, int} [inShift, ttlSeconds] */
+    private function _computeIsInShift(): array
+    {
+        // Commission, partner, free, custom rate → no shift restriction
+        if (!$this->plan
+            || $this->plan->type === Plan::TYPE_COMMISSION
+            || $this->plan->type === Plan::TYPE_PARTNER
+            || $this->plan->type === Plan::TYPE_FREE
+            || $this->custom_commission_rate !== null
+        ) {
+            return [true, 120];
+        }
+
+        // Weekly plan, no shifts assigned → blocked
+        if ($this->shifts->isEmpty()) {
+            return [false, 30];
+        }
+
+        // Find active shift and cache until it ends (max 120s) so expiry is precise
+        foreach ($this->shifts as $shift) {
+            if ($shift->isNowInShift()) {
+                $ttl = max(1, min(120, $shift->secondsUntilEnd()));
+                return [true, $ttl];
+            }
+        }
+
+        return [false, 30];
     }
 
     /**

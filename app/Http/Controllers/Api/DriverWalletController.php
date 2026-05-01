@@ -45,48 +45,55 @@ class DriverWalletController extends Controller
         $driver = $request->user();
         $amount = (float) $request->input('amount');
 
-            // 🔹 Kiểm tra số tiền rút tối thiểu
         if ($amount < 100000) {
             return response()->json([
                 'message' => 'Số tiền rút tối thiểu là 100.000₫',
             ], 400);
         }
 
-        $wallet = DriverWallet::firstOrCreate(['driver_id' => $driver->id]);
-
-        if ($wallet->balance < $amount) {
-            return response()->json(['message' => 'Số dư không đủ'], 400);
-        }
-
-        // 🔹 Kiểm tra thông tin ngân hàng
         $bank = Bank::where('user_id', $driver->id)->first();
         if (!$bank) {
             return response()->json([
-                'message' => 'Vui lòng cập nhật thông tin ngân hàng trước khi rút tiền',
-                'require_bank' => true, // 👈 để app biết mở form
+                'message'      => 'Vui lòng cập nhật thông tin ngân hàng trước khi rút tiền',
+                'require_bank' => true,
             ], 400);
         }
 
-        // 🔹 Tạo request + trừ ví trong 1 transaction để đảm bảo atomic
-        $withdraw = DB::transaction(function () use ($driver, $amount, $bank) {
-            $withdraw = WithdrawRequest::create([
-                'driver_id' => $driver->id,
-                'amount'    => $amount,
-                'status'    => 'pending',
-                'note'      => 'Rút về ' . $bank->bank_name . ' - ' . $bank->bank_account,
-            ]);
+        // Ensure wallet row exists before locking
+        DriverWallet::firstOrCreate(['driver_id' => $driver->id]);
 
-            // Reference unique theo ID yêu cầu — tránh bị duplicate check chặn nhầm
-            DriverWalletService::adjust(
-                $driver->id,
-                $amount,
-                'debit',
-                'Yêu cầu rút tiền #' . $withdraw->id,
-                'withdraw_request_' . $withdraw->id
-            );
+        try {
+            $withdraw = DB::transaction(function () use ($driver, $amount, $bank) {
+                // Lock the wallet row so concurrent requests are serialised
+                $wallet = DriverWallet::where('driver_id', $driver->id)->lockForUpdate()->first();
 
-            return $withdraw;
-        });
+                if ($wallet->balance < $amount) {
+                    throw new \RuntimeException('INSUFFICIENT_BALANCE');
+                }
+
+                $withdraw = WithdrawRequest::create([
+                    'driver_id' => $driver->id,
+                    'amount'    => $amount,
+                    'status'    => 'pending',
+                    'note'      => 'Rút về ' . $bank->bank_name . ' - ' . $bank->bank_account,
+                ]);
+
+                DriverWalletService::adjust(
+                    $driver->id,
+                    $amount,
+                    'debit',
+                    'Yêu cầu rút tiền #' . $withdraw->id,
+                    'withdraw_request_' . $withdraw->id
+                );
+
+                return $withdraw;
+            });
+        } catch (\RuntimeException $e) {
+            if ($e->getMessage() === 'INSUFFICIENT_BALANCE') {
+                return response()->json(['message' => 'Số dư không đủ'], 400);
+            }
+            throw $e;
+        }
 
         return response()->json([
             'message'  => 'Yêu cầu rút tiền đã được gửi',
