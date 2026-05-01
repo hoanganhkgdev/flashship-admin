@@ -74,9 +74,9 @@ class OrderObserver
     public function deleted(Order $order): void
     {
         $orderId = $order->id;
-        dispatch(function () use ($orderId) {
-            $order = Order::withTrashed()->find($orderId);
-            if ($order) FirebaseRTDBService::removeOrder($order);
+        $cityId  = $order->city_id;
+        dispatch(function () use ($orderId, $cityId) {
+            FirebaseRTDBService::removeOrderById($orderId, $cityId);
         })->afterResponse();
     }
 }

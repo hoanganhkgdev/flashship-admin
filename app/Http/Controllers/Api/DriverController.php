@@ -84,11 +84,42 @@ class DriverController extends Controller
         return response()->json($result, $status);
     }
 
-    public function deleteAccount(Request $request): JsonResponse
+    public function requestDeleteAccount(Request $request): JsonResponse
     {
-        $request->user()->delete();
+        $user = $request->user();
 
-        return response()->json(['success' => true, 'message' => 'Tài khoản đã được xóa']);
+        if ($user->delete_requested_at) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Bạn đã gửi yêu cầu xóa tài khoản trước đó. Vui lòng chờ admin xử lý.',
+            ], 422);
+        }
+
+        $user->update(['delete_requested_at' => now()]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Yêu cầu xóa tài khoản đã được gửi. Admin sẽ xem xét và xử lý sau khi hoàn tất các giao dịch còn lại.',
+        ]);
+    }
+
+    public function cancelDeleteAccount(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user->delete_requested_at) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không có yêu cầu xóa tài khoản nào đang chờ xử lý.',
+            ], 422);
+        }
+
+        $user->update(['delete_requested_at' => null]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Đã hủy yêu cầu xóa tài khoản.',
+        ]);
     }
 
     public function updateLocation(UpdateLocationRequest $request): JsonResponse

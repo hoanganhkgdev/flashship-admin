@@ -50,7 +50,7 @@ class FirebaseRTDBService
                 'delivery_address' => $order->delivery_address,
                 'sender_name'      => $order->sender_name   ?? $order->pickup_name   ?? '',
                 'sender_phone'     => $order->sender_phone  ?? $order->pickup_phone  ?? '',
-                'recipient_name'   => $order->recipient_name ?? $order->delivery_name ?? '',
+                'recipient_name'   => $order->receiver_name ?? $order->delivery_name ?? '',
                 'recipient_phone'  => $order->recipient_phone ?? $order->delivery_phone ?? '',
                 'shipping_fee'     => (float) ($order->shipping_fee ?? 0),
                 'bonus_fee'        => (float) ($order->bonus_fee ?? 0),
@@ -76,22 +76,27 @@ class FirebaseRTDBService
      */
     public static function removeOrder($order): void
     {
+        static::removeOrderById($order->id, $order->city_id);
+    }
+
+    public static function removeOrderById(int $orderId, ?int $cityId): void
+    {
         try {
             $token = static::getAccessToken();
             if (!$token) return;
 
-            $path = "/" . static::ns() . "/orders/city_{$order->city_id}/order_{$order->id}.json";
+            $path = "/" . static::ns() . "/orders/city_{$cityId}/order_{$orderId}.json";
             $url  = static::getDatabaseUrl() . $path;
 
             $response = Http::withToken($token)->delete($url);
 
             if ($response->successful()) {
-                Log::info("🗑️ RTDB: Removed order #{$order->id}");
+                Log::info("🗑️ RTDB: Removed order #{$orderId}");
             } else {
-                Log::error("❌ RTDB: removeOrder failed #{$order->id}: " . $response->body());
+                Log::error("❌ RTDB: removeOrder failed #{$orderId}: " . $response->body());
             }
         } catch (\Throwable $e) {
-            Log::error("❌ RTDB: removeOrder exception #{$order->id}: " . $e->getMessage());
+            Log::error("❌ RTDB: removeOrder exception #{$orderId}: " . $e->getMessage());
         }
     }
 
@@ -209,6 +214,32 @@ class FirebaseRTDBService
             Http::withToken($token)->delete($url);
         } catch (\Throwable $e) {
             Log::error("❌ RTDB: deleteDriverLocation exception driver#{$driverId}: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Xóa toàn bộ dữ liệu tài xế trên Firebase RTDB khi tài khoản bị xóa.
+     * Path: /flashship/drivers/driver_{id}.json
+     * Path: /flashship/locations/driver_{id}.json
+     */
+    public static function deleteDriverProfile(int $driverId): void
+    {
+        try {
+            $token = static::getAccessToken();
+            if (!$token) {
+                Log::warning("⚠️ RTDB deleteDriverProfile: Không lấy được token.");
+                return;
+            }
+
+            $base = static::getDatabaseUrl();
+            $ns   = static::ns();
+
+            Http::withToken($token)->delete("{$base}/{$ns}/drivers/driver_{$driverId}.json");
+            Http::withToken($token)->delete("{$base}/{$ns}/locations/driver_{$driverId}.json");
+
+            Log::info("🗑️ RTDB: Đã xóa driver#{$driverId} khỏi Firebase (profile + location)");
+        } catch (\Throwable $e) {
+            Log::error("❌ RTDB: deleteDriverProfile exception driver#{$driverId}: " . $e->getMessage());
         }
     }
 }

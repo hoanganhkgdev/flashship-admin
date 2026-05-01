@@ -54,7 +54,8 @@ Route::prefix('driver')->middleware('auth:sanctum')->group(function () {
     Route::get('/profile', [DriverController::class, 'profile']);
     Route::post('/profile/update', [DriverController::class, 'updateProfile']);
     Route::post('/change-password', [DriverController::class, 'changePassword']);
-    Route::delete('/delete-account', [DriverController::class, 'deleteAccount']);
+    Route::post('/delete-account/request', [DriverController::class, 'requestDeleteAccount']);
+    Route::post('/delete-account/cancel', [DriverController::class, 'cancelDeleteAccount']);
     Route::post('/upload-license', [DriverLicenseController::class, 'upload']);
     Route::post('/update-fcm-token', [DriverController::class, 'updateFcmToken']);
     Route::post('/toggle-status', [DriverController::class, 'toggleOnline']);

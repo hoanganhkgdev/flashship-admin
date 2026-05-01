@@ -370,6 +370,15 @@ class DeliverymanResource extends Resource
                     ->color('gray')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
+
+                Tables\Columns\TextColumn::make('delete_requested_at')
+                    ->label('Y/c xóa TK')
+                    ->badge()
+                    ->color('danger')
+                    ->formatStateUsing(fn($state) => $state ? 'Chờ duyệt xóa' : null)
+                    ->placeholder('—')
+                    ->sortable()
+                    ->alignCenter(),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
@@ -389,6 +398,11 @@ class DeliverymanResource extends Resource
                     ->label('Xác minh hồ sơ')
                     ->trueLabel('Đã xác minh')
                     ->falseLabel('Chưa xác minh'),
+
+                Tables\Filters\Filter::make('pending_delete')
+                    ->label('Đang chờ xóa tài khoản')
+                    ->query(fn($query) => $query->whereNotNull('delete_requested_at'))
+                    ->toggle(),
             ])
             ->actions([
                 Tables\Actions\Action::make('approve')
@@ -402,7 +416,29 @@ class DeliverymanResource extends Resource
                     ->modalDescription(fn($record) => "Duyệt và kích hoạt tài khoản cho {$record->name}?")
                     ->action(fn($record) => $record->update(['status' => 1])),
 
+                Tables\Actions\Action::make('approve_delete')
+                    ->label('Duyệt xóa TK')
+                    ->icon('heroicon-o-trash')
+                    ->color('danger')
+                    ->size('sm')
+                    ->visible(fn($record) => $record->delete_requested_at !== null)
+                    ->requiresConfirmation()
+                    ->modalHeading('Duyệt xóa tài khoản')
+                    ->modalDescription(fn($record) => "Xóa vĩnh viễn tài khoản {$record->name}? Hành động này không thể hoàn tác.")
+                    ->modalSubmitActionLabel('Đồng ý xóa')
+                    ->action(fn($record) => $record->delete()),
+
                 Tables\Actions\ActionGroup::make([
+                    Tables\Actions\Action::make('reject_delete')
+                        ->label('Từ chối xóa TK')
+                        ->icon('heroicon-o-x-circle')
+                        ->color('warning')
+                        ->visible(fn($record) => $record->delete_requested_at !== null)
+                        ->requiresConfirmation()
+                        ->modalHeading('Từ chối yêu cầu xóa')
+                        ->modalDescription(fn($record) => "Từ chối yêu cầu xóa tài khoản của {$record->name}?")
+                        ->action(fn($record) => $record->update(['delete_requested_at' => null])),
+
                     Tables\Actions\Action::make('block')
                         ->label('Khóa tài khoản')
                         ->icon('heroicon-o-lock-closed')->color('danger')

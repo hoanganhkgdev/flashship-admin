@@ -64,9 +64,10 @@ class DriverService
             'custom_commission_rate' => $user->custom_commission_rate,
             'license_status'        => $latestLicense?->status,
             'license_image_url'     => $latestLicense ? asset('storage/' . $latestLicense->image_path) : null,
-            'can_edit_name'         => $canEditName,
-            'name_updated_at'       => $user->name_updated_at ? Carbon::parse($user->name_updated_at)->toDateTimeString() : null,
-            'next_name_edit_date'   => $nextEditDate,
+            'can_edit_name'          => $canEditName,
+            'name_updated_at'        => $user->name_updated_at ? Carbon::parse($user->name_updated_at)->toDateTimeString() : null,
+            'next_name_edit_date'    => $nextEditDate,
+            'delete_requested_at'    => $user->delete_requested_at?->toDateTimeString(),
         ];
     }
 
