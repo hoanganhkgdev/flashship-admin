@@ -339,7 +339,7 @@ class WithdrawRequestResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return auth()->check() && auth()->user()->hasAnyRole(['admin', 'manager', 'dispatcher']);
+        return auth()->check() && auth()->user()->hasRole('admin');
     }
 
     public static function canCreate(): bool

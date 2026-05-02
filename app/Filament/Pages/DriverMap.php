@@ -17,8 +17,14 @@ class DriverMap extends Page
 
     protected function getViewData(): array
     {
-        $cityId = session('current_city_id');
-        $city   = \App\Models\City::find($cityId);
+        $user = auth()->user();
+
+        // Dispatcher/manager dùng city_id của tài khoản, admin dùng session city switcher
+        $cityId = $user->hasRole('admin')
+            ? session('current_city_id')
+            : $user->city_id;
+
+        $city = \App\Models\City::find($cityId);
 
         $center = [
             'lat' => (float) ($city?->latitude  ?: 10.038),

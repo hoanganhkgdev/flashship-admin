@@ -273,7 +273,7 @@ class DriverLicenseResource extends Resource
         return [DriverLicenseOverviewWidget::class];
     }
 
-    public static function canViewAny(): bool       { return auth()->check() && auth()->user()->hasAnyRole(['admin', 'manager', 'dispatcher']); }
+    public static function canViewAny(): bool       { return auth()->check() && auth()->user()->hasRole('admin'); }
     public static function canCreate(): bool        { return auth()->check() && auth()->user()->hasRole('admin'); }
     public static function canEdit($record): bool   { return auth()->check() && auth()->user()->hasRole('admin'); }
     public static function canDelete($record): bool { return auth()->check() && auth()->user()->hasRole('admin'); }

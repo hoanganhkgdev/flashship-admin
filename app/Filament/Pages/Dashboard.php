@@ -2,14 +2,27 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Widgets\DashboardHeaderWidget;
+use App\Filament\Widgets\DashboardStatsWidget;
 use Filament\Pages\Dashboard as BaseDashboard;
 
 class Dashboard extends BaseDashboard
 {
     public static function canAccess(): bool
     {
-        // Cho phép admin, dispatcher, manager, accountant xem Bảng điều khiển
         return auth()->user()->hasAnyRole(['admin', 'dispatcher', 'manager', 'accountant', 'subadmin']);
     }
-}
 
+    public function getWidgets(): array
+    {
+        return [
+            DashboardHeaderWidget::class,
+            DashboardStatsWidget::class,
+        ];
+    }
+
+    public function getColumns(): int|array
+    {
+        return 1;
+    }
+}
