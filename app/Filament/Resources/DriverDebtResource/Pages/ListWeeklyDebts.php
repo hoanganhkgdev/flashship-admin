@@ -100,35 +100,6 @@ class ListWeeklyDebts extends ListRecords
         session()->forget('debt_redirected');
     }
 
-    public function getTabs(): array
-    {
-        $cityId = session('current_city_id');
-
-        // Gộp 2 query thành 1 để tránh 2 full table scan riêng biệt
-        $counts = \App\Models\DriverDebt::query()
-            ->whereIn('debt_type', ['commission', 'weekly'])
-            ->where('status', 'pending')
-            ->when($cityId, fn($q) => $q->whereHas('driver', fn($d) => $d->where('city_id', $cityId)))
-            ->selectRaw('debt_type, COUNT(*) as total')
-            ->groupBy('debt_type')
-            ->pluck('total', 'debt_type');
-
-        $commissionCount = $counts->get('commission', 0);
-        $weeklyCount     = $counts->get('weekly', 0);
-
-        return [
-            'commission' => \Filament\Resources\Pages\ListRecords\Tab::make('Chiết khấu (%)')
-                ->icon('heroicon-m-receipt-percent')
-                ->badge($commissionCount > 0 ? $commissionCount : null)
-                ->badgeColor('warning')
-                ->url(DriverDebtResource::getUrl('commission')),
-            'weekly' => \Filament\Resources\Pages\ListRecords\Tab::make('Gói cố định (Tuần)')
-                ->icon('heroicon-m-calendar-days')
-                ->badge($weeklyCount > 0 ? $weeklyCount : null)
-                ->badgeColor('danger')
-                ->url(DriverDebtResource::getUrl('weekly')),
-        ];
-    }
 
     protected function getTableQuery(): Builder
     {
