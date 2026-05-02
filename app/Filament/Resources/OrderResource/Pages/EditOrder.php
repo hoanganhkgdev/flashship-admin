@@ -26,6 +26,25 @@ class EditOrder extends EditRecord
             $data['completed_at'] = now();
         }
 
+        // Bảo vệ race condition: tài xế nhận đơn trong lúc tổng đài đang sửa form.
+        // Form load khi đơn còn pending (delivery_man_id = null), sau đó tài xế nhận đơn,
+        // nếu không check thì lưu form sẽ ghi null lên delivery_man_id → đơn "assigned" nhưng mất tài xế.
+        if (empty($data['delivery_man_id'])) {
+            $currentDriverId = \App\Models\Order::where('id', $this->record->id)
+                ->value('delivery_man_id');
+
+            if ($currentDriverId) {
+                $data['delivery_man_id'] = $currentDriverId;
+
+                Notification::make()
+                    ->title('⚠️ Đơn vừa có tài xế nhận trong lúc bạn sửa!')
+                    ->body('Thông tin tài xế đã được giữ nguyên. Vui lòng kiểm tra lại đơn hàng.')
+                    ->warning()
+                    ->persistent()
+                    ->send();
+            }
+        }
+
         return $data;
     }
 }
