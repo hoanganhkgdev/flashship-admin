@@ -25,6 +25,9 @@ Route::get('/pages/{slug}', function ($slug) {
 });
 
 Route::middleware(['auth'])->group(function () {
+    Route::get('/reports/revenue/export', \App\Http\Controllers\RevenueExportController::class)
+        ->name('revenue-report.export');
+
     Route::post('/admin/update-fcm-token', function (\Illuminate\Http\Request $request) {
         $request->validate(['fcm_token' => 'required|string']);
         $request->user()->update(['fcm_token' => $request->fcm_token]);
